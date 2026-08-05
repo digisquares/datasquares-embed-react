@@ -32,7 +32,7 @@
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/worksquares/datasquares-embed-react.git"
