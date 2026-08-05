@@ -12,7 +12,7 @@ npm install @digisquares/datasquares-embed-react
 Or straight from the repository (builds on install via the `prepare` script):
 
 ```sh
-npm install github:worksquares/datasquares-embed-react
+npm install github:digisquares/datasquares-embed-react
 ```
 
 ```tsx
