@@ -1,4 +1,4 @@
-# @datasquares/embed-react
+# @digisquares/datasquares-embed-react
 
 React SDK for embedding DataSquares dashboards and reports: the `<DataSquaresEmbed>`
 component, typed events, host-side controls, and a server-side token helper.
@@ -6,11 +6,10 @@ component, typed events, host-side controls, and a server-side token helper.
 ## Install
 
 ```sh
-npm install @datasquares/embed-react
+npm install @digisquares/datasquares-embed-react
 ```
 
-Until the npm release, install straight from the repository (builds on install
-via the `prepare` script):
+Or straight from the repository (builds on install via the `prepare` script):
 
 ```sh
 npm install github:worksquares/datasquares-embed-react
@@ -18,7 +17,7 @@ npm install github:worksquares/datasquares-embed-react
 
 ```tsx
 import { useRef } from 'react'
-import { DataSquaresEmbed, type DataSquaresEmbedHandle } from '@datasquares/embed-react'
+import { DataSquaresEmbed, type DataSquaresEmbedHandle } from '@digisquares/datasquares-embed-react'
 
 function Analytics({ token }: { token: string }) {
   const embed = useRef<DataSquaresEmbedHandle>(null)
@@ -73,7 +72,7 @@ the token:
 
 ```ts
 // e.g. an Express/Next route handler on YOUR server
-import { createEmbedToken } from '@datasquares/embed-react'
+import { createEmbedToken } from '@digisquares/datasquares-embed-react'
 
 const { token } = await createEmbedToken({
   apiUrl: 'https://api.datasquares.ai',
