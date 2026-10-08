@@ -1,5 +1,7 @@
 {
   "extends": "./tsconfig.json",
+  // TypeScript 6 wants the output root said, not inferred: dist/ mirrors src/.
+  "compilerOptions": { "rootDir": "src" },
   "include": ["src"],
   "exclude": ["tests", "**/*.test.ts", "**/*.test.tsx"]
 }
