@@ -81,8 +81,8 @@ session has ended, until the token arrives, which then starts it.
   without a rule is refused (`__proto__`, `constructor` and `prototype` are no
   attribute names) — and each rule filters its model field to the person's
   value. A customer whose `sub` is a member's email is another person. Views
-  are counted per person (an opened dashboard or report for 30 minutes, and
-  each export; 20,000 a month included, then billed per 1,000) and Ask AI,
+  are counted per person (an opened dashboard or report for 30 minutes;
+  20,000 a month included, then billed per 1,000) and Ask AI,
   when the app offers it to a `viewer_ai`, is
   paid from your company's bought credits, with per-person and per-tenant
   budgets.
