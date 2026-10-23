@@ -67,17 +67,23 @@ function Analytics() {
 The token is HS256, lives ten minutes at most (five by default) and opens one
 session: `getToken` is called when the embed starts and again before its
 session (an hour) ends. It is handed to the embed by `postMessage` at the
-exact DataSquares origin, never in a URL.
+exact DataSquares origin, never in a URL. The embed waits ten seconds for it:
+a `getToken` slower than that shows that the view needs a token, or that its
+session has ended, until the token arrives, which then starts it.
 
 - **Internal embedding** (Business): `sub` is the person's DataSquares email or
   SCIM id; everything is then their own: role, row-level security, AI credits.
-  An internal token carries no attributes.
+  They open only what their role, or a share of a dashboard to them, opens in
+  DataSquares. An internal token carries no attributes.
 - **Customer-facing embedding** (Enterprise): `sub` and `tenant` name an
   embedded person, who is not a seat. The token's attributes must match the
   app's row rules exactly — every rule needs its attribute and an attribute
-  without a rule is refused — and each rule filters its model field to the
-  person's value. Views are counted per person (20,000 a month included, then
-  billed per 1,000) and Ask AI, when the app offers it to a `viewer_ai`, is
+  without a rule is refused (`__proto__`, `constructor` and `prototype` are no
+  attribute names) — and each rule filters its model field to the person's
+  value. A customer whose `sub` is a member's email is another person. Views
+  are counted per person (an opened dashboard or report for 30 minutes, and
+  each export; 20,000 a month included, then billed per 1,000) and Ask AI,
+  when the app offers it to a `viewer_ai`, is
   paid from your company's bought credits, with per-person and per-tenant
   budgets.
 
