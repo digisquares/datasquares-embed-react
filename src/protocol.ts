@@ -35,7 +35,8 @@ export interface EmbedResizeMessage {
   height: number
 }
 
-export type EmbedErrorKind = 'invalid' | 'forbidden' | 'network' | 'password-required'
+/** `expired`: an embedded person's session ended and the host gave no new signed token (two keys, below). */
+export type EmbedErrorKind = 'invalid' | 'forbidden' | 'network' | 'password-required' | 'expired'
 
 export interface EmbedErrorMessage {
   type: 'ds:error'
@@ -74,6 +75,17 @@ export interface EmbedStateMessage {
   state: EmbedState
 }
 
+/**
+ * Two keys (DataSquares AI plan chapter 12): the embed asks its host for the person's signed token — when it starts,
+ * and again when its session is about to end — and the host answers with a `ds:token` command. The token never rides
+ * in a URL.
+ */
+export interface EmbedTokenRequestMessage {
+  type: 'ds:token-request'
+  version: typeof EMBED_PROTOCOL_VERSION
+  reason: 'start' | 'renew'
+}
+
 export type EmbedOutMessage =
   | EmbedReadyMessage
   | EmbedResizeMessage
@@ -82,6 +94,7 @@ export type EmbedOutMessage =
   | EmbedPointClickMessage
   | EmbedFilterChangeMessage
   | EmbedStateMessage
+  | EmbedTokenRequestMessage
 
 // ── Host → embed (commands the SDK sends) ───────────────────────────────
 
@@ -108,7 +121,14 @@ export interface GetStateCommand {
   requestId?: string
 }
 
-export type EmbedInMessage = SetParamsCommand | SetPageCommand | RefreshCommand | GetStateCommand
+/** The host's answer to a token request: a short-lived token its server signed for this person. */
+export interface TokenCommand {
+  type: 'ds:token'
+  version: typeof EMBED_PROTOCOL_VERSION
+  token: string
+}
+
+export type EmbedInMessage = SetParamsCommand | SetPageCommand | RefreshCommand | GetStateCommand | TokenCommand
 
 const OUT_TYPES = new Set([
   'ds:ready',
@@ -118,6 +138,7 @@ const OUT_TYPES = new Set([
   'ds:point-click',
   'ds:filter-change',
   'ds:state',
+  'ds:token-request',
 ])
 
 /**
@@ -145,6 +166,8 @@ export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
       return Array.isArray(msg.filters)
     case 'ds:state':
       return typeof msg.state === 'object' && msg.state !== null
+    case 'ds:token-request':
+      return msg.reason === 'start' || msg.reason === 'renew'
     default:
       return false
   }

@@ -1,7 +1,5 @@
-export { DataSquaresEmbed, buildEmbedUrl } from './DataSquaresEmbed.js'
+export { DataSquaresEmbed, buildEmbedUrl, buildSessionEmbedUrl } from './DataSquaresEmbed.js'
 export type { DataSquaresEmbedProps, DataSquaresEmbedHandle } from './DataSquaresEmbed.js'
-export { createEmbedToken } from './token.js'
-export type { CreateEmbedTokenInput, EmbedTokenResult } from './token.js'
 export {
   EMBED_PROTOCOL_VERSION,
   isEmbedOutMessage,
@@ -12,4 +10,8 @@ export type {
   EmbedInMessage,
   EmbedOutMessage,
   EmbedState,
+  EmbedTokenRequestMessage,
+  TokenCommand,
 } from './protocol.js'
+// The server-side signer is its own entry, `@digisquares/datasquares-embed-react/server`, so a browser bundle never
+// carries a function that takes your embed app's secret.

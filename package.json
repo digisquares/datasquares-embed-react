@@ -1,7 +1,7 @@
 {
   "name": "@digisquares/datasquares-embed-react",
-  "version": "0.1.0",
-  "description": "React SDK for embedding DataSquares dashboards and reports: the <DataSquaresEmbed> component, typed events, host-side controls (params, pages, refresh), and a server-side token helper.",
+  "version": "0.2.0",
+  "description": "React SDK for embedding DataSquares dashboards and reports: the <DataSquaresEmbed> component, typed events, host-side controls (params, pages, refresh), and a server-side signer for each person's short-lived embed token.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     }
   },
   "files": [

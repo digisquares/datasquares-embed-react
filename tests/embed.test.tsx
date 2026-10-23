@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRef } from 'react'
 import { render, cleanup, act } from '@testing-library/react'
-import { DataSquaresEmbed, buildEmbedUrl, type DataSquaresEmbedHandle } from '../src/DataSquaresEmbed.js'
+import { DataSquaresEmbed, buildEmbedUrl, buildSessionEmbedUrl, type DataSquaresEmbedHandle } from '../src/DataSquaresEmbed.js'
 import { isEmbedOutMessage } from '../src/protocol.js'
 
 const BASE = 'https://app.datasquares.ai'
@@ -183,5 +183,79 @@ describe('isEmbedOutMessage', () => {
     expect(isEmbedOutMessage({ type: 'ds:resize', version: 1, height: 640 })).toBe(true)
     expect(isEmbedOutMessage({ type: 'ds:filter-change', version: 1, filters: [] })).toBe(true)
     expect(isEmbedOutMessage({ type: 'ds:state', version: 1, state: { pageId: null, params: {} } })).toBe(true)
+  })
+})
+
+// ── Two keys (DataSquares AI plan chapter 12): the person's signed token ──────────────────────────────────────────
+// The host's server signs a short-lived token for each person with its embed app's key; the browser carries only that
+// token, and never in a URL: the embed asks for it (ds:token-request) and the component answers with getToken().
+
+describe('buildSessionEmbedUrl', () => {
+  it('opens the session embed with its options and never a token in the URL', () => {
+    const url = new URL(buildSessionEmbedUrl({ baseUrl: BASE, theme: 'dark', toolbar: false, params: { region: 'west' } }))
+    expect(url.origin).toBe(BASE)
+    expect(url.pathname).toBe('/embed/session')
+    expect(url.searchParams.get('token')).toBeNull()
+    expect(url.hash).toBe('')
+    expect(url.searchParams.get('theme')).toBe('dark')
+    expect(url.searchParams.get('toolbar')).toBe('false')
+    expect(url.searchParams.get('p_region')).toBe('west')
+  })
+})
+
+describe('<DataSquaresEmbed getToken>', () => {
+  function renderSession(getToken: () => Promise<string>, onError = vi.fn()) {
+    const utils = render(<DataSquaresEmbed baseUrl={BASE} getToken={getToken} onError={onError} />)
+    const iframe = utils.container.querySelector('iframe')!
+    const post = vi.fn()
+    const cw = { postMessage: post }
+    Object.defineProperty(iframe, 'contentWindow', { value: cw })
+    return { iframe, post, cw, onError }
+  }
+
+  it('loads the session embed and answers its token request with the signed token, at the exact origin', async () => {
+    const getToken = vi.fn(async () => 'signed.person.token')
+    const { iframe, post, cw } = renderSession(getToken)
+    expect(new URL(iframe.src).pathname).toBe('/embed/session')
+    expect(iframe.src).not.toContain('signed')
+
+    dispatch({ type: 'ds:token-request', version: 1, reason: 'start' }, BASE, cw)
+    await vi.waitFor(() => expect(post).toHaveBeenCalledWith({ type: 'ds:token', version: 1, token: 'signed.person.token' }, BASE))
+    expect(getToken).toHaveBeenCalledTimes(1)
+
+    // The session ends: the embed asks again, and a fresh token is signed.
+    dispatch({ type: 'ds:token-request', version: 1, reason: 'renew' }, BASE, cw)
+    await vi.waitFor(() => expect(getToken).toHaveBeenCalledTimes(2))
+  })
+
+  it('never answers a token request from another origin or another window', async () => {
+    const getToken = vi.fn(async () => 'signed.person.token')
+    const { cw } = renderSession(getToken)
+    dispatch({ type: 'ds:token-request', version: 1, reason: 'start' }, 'https://evil.example', cw)
+    dispatch({ type: 'ds:token-request', version: 1, reason: 'start' }, BASE, { other: true })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(getToken).not.toHaveBeenCalled()
+  })
+
+  it('a getToken that fails is an error the host hears about, and nothing is posted', async () => {
+    const { cw, post, onError } = renderSession(async () => {
+      throw new Error('your server said no')
+    })
+    dispatch({ type: 'ds:token-request', version: 1, reason: 'start' }, BASE, cw)
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith({ kind: 'invalid' }))
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('a share link still embeds with its token and content id', () => {
+    const { iframe } = renderEmbed()
+    expect(new URL(iframe.src).pathname).toBe('/embed/dash-1')
+  })
+})
+
+describe('isEmbedOutMessage: the token request', () => {
+  it('accepts a token request and refuses one without its reason', () => {
+    expect(isEmbedOutMessage({ type: 'ds:token-request', version: 1, reason: 'start' })).toBe(true)
+    expect(isEmbedOutMessage({ type: 'ds:token-request', version: 1 })).toBe(false)
+    expect(isEmbedOutMessage({ type: 'ds:token', version: 1, token: 'x' })).toBe(false) // inbound type
   })
 })

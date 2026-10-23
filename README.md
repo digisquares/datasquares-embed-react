@@ -1,7 +1,8 @@
 # @digisquares/datasquares-embed-react
 
 React SDK for embedding DataSquares dashboards and reports: the `<DataSquaresEmbed>`
-component, typed events, host-side controls, and a server-side token helper.
+component, typed events, host-side controls, and a server-side signer for each
+person's short-lived embed token.
 
 ## Install
 
@@ -15,28 +16,80 @@ Or straight from the repository (builds on install via the `prepare` script):
 npm install github:digisquares/datasquares-embed-react
 ```
 
+## Two keys: each person, on your site
+
+To show dashboards inside your own product, to your own people, make an embed
+app in DataSquares (**Administration → Settings → Embedding**). It has a
+client id and a key (a key id and a secret, shown once): the company key. For
+each person, **your server** signs a short-lived token with that key: the
+person's id. The browser only ever carries that token, and the embed swaps it
+for a session bound to your site.
+
+```ts
+// On YOUR server, e.g. an Express or Next.js route your page calls
+import { signEmbedToken } from '@digisquares/datasquares-embed-react/server'
+
+app.get('/analytics-token', requireSignedIn, async (req, res) => {
+  const token = await signEmbedToken({
+    clientId: process.env.DS_EMBED_CLIENT_ID!,
+    keyId: process.env.DS_EMBED_KEY_ID!,
+    secret: process.env.DS_EMBED_SECRET!,          // never sent to a browser
+    sub: req.user.id,                              // stable, opaque: no email needed
+    tenant: req.user.accountId,                    // their customer account
+    role: req.user.canAskAi ? 'viewer_ai' : 'viewer',
+    attributes: { account: req.user.accountId },   // one per row rule of the app
+    content: { type: 'dashboard', id: 'your-dashboard-id' },
+  })
+  res.type('text/plain').send(token)
+})
+```
+
 ```tsx
 import { useRef } from 'react'
 import { DataSquaresEmbed, type DataSquaresEmbedHandle } from '@digisquares/datasquares-embed-react'
 
-function Analytics({ token }: { token: string }) {
+function Analytics() {
   const embed = useRef<DataSquaresEmbedHandle>(null)
-
   return (
     <DataSquaresEmbed
       ref={embed}
       baseUrl="https://app.datasquares.ai"
-      contentId="your-dashboard-id"
-      token={token}
+      getToken={() => fetch('/analytics-token').then((r) => r.text())}
       theme="dark"
       params={{ region: 'west' }}
       onReady={({ pages }) => console.log('pages', pages)}
-      onFilterChange={(filters) => console.log('filters', filters)}
-      onPointClick={({ cardId, value }) => console.log('clicked', cardId, value)}
+      onError={({ kind }) => console.warn('embed', kind)}
     />
   )
 }
 ```
+
+The token is HS256, lives ten minutes at most (five by default) and opens one
+session: `getToken` is called when the embed starts and again before its
+session (an hour) ends. It is handed to the embed by `postMessage` at the
+exact DataSquares origin, never in a URL.
+
+- **Internal embedding** (Business): `sub` is the person's DataSquares email or
+  SCIM id; everything is then their own: role, row-level security, AI credits.
+  An internal token carries no attributes.
+- **Customer-facing embedding** (Enterprise): `sub` and `tenant` name an
+  embedded person, who is not a seat. The token's attributes must match the
+  app's row rules exactly — every rule needs its attribute and an attribute
+  without a rule is refused — and each rule filters its model field to the
+  person's value. Views are counted per person (20,000 a month included, then
+  billed per 1,000) and Ask AI, when the app offers it to a `viewer_ai`, is
+  paid from your company's bought credits, with per-person and per-tenant
+  budgets.
+
+## A share link
+
+A dashboard's public share link embeds with its token and id:
+
+```tsx
+<DataSquaresEmbed baseUrl="https://app.datasquares.ai" contentId="your-dashboard-id" token={shareToken} />
+```
+
+A share token is a credential: anyone holding it sees the view.
 
 The iframe auto-resizes to its content. Turn that off with `autoResize={false}`
 and a fixed `height`.
@@ -58,33 +111,16 @@ const { pageId, params } = await embed.current!.getState()
 | Prop | Fires when |
 |---|---|
 | `onReady` | the embed authorized and rendered (`contentType`, `pages`) |
-| `onError` | it could not render — `invalid`, `forbidden`, `network`, `password-required` |
+| `onError` | it could not render — `invalid`, `forbidden`, `network`, `password-required`, `expired` (a session ended with no new token) |
 | `onPageChange` | the visible dashboard page changed |
 | `onPointClick` | a chart data point was clicked |
 | `onFilterChange` | the cross-filter set changed (chart click, slicer, clear) |
 
-## Minting tokens — server-side only
+## Upgrading from 0.1
 
-Embed tokens are minted with your DataSquares credentials, so the exchange
-belongs on **your backend**, never in the browser. Your endpoint authenticates
-*your* user, chooses that user's row-level-security context, and returns only
-the token:
-
-```ts
-// e.g. an Express/Next route handler on YOUR server
-import { createEmbedToken } from '@digisquares/datasquares-embed-react'
-
-const { token } = await createEmbedToken({
-  apiUrl: 'https://api.datasquares.ai',
-  accessToken: process.env.DATASQUARES_TOKEN!,
-  contentType: 'dashboard',
-  contentId: 'your-dashboard-id',
-  rlsContext: { tenant_id: currentUser.tenantId },  // per-viewer row scoping
-  expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-})
-```
-
-The `rlsContext` is bound into the token — the viewer cannot see or change it.
+`createEmbedToken` is gone: the per-viewer tokens it minted (`POST /api/embed-tokens`)
+were never redeemed by DataSquares and that endpoint is retired. Make an embed
+app and sign each person's token with `signEmbedToken` (above).
 
 ## Domain restriction
 
@@ -98,7 +134,8 @@ for the host page:
   `strict-origin-when-cross-origin` on its iframe, which sends the origin and
   nothing more.
 - The restriction controls where content can be *rendered*. The share token is
-  still the credential — treat it like one.
+  still the credential — treat it like one. An embedded person's session is
+  bound to the one site it was opened on.
 
 ## Security model
 
@@ -108,3 +145,5 @@ for the host page:
 - Commands are posted to that exact origin, never `'*'` — if the frame is
   navigated elsewhere, commands are dropped by the browser, not delivered.
 - Message payloads are structurally validated before any handler runs.
+- A token request is answered only for this iframe at the DataSquares origin,
+  and the signed token is posted to that exact origin.
