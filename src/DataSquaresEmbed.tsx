@@ -47,6 +47,7 @@ import {
 } from 'react'
 import {
   isEmbedOutMessage,
+  type EmbedContentType,
   type EmbedErrorKind,
   type EmbedFilter,
   type EmbedInMessage,
@@ -65,7 +66,7 @@ export interface DataSquaresEmbedProps {
    * content, so `contentId` and `token` are not used with it.
    */
   getToken?: () => Promise<string>
-  /** A share link's dashboard or report id (with `token`). */
+  /** A share link's dashboard, report or presentation id (with `token`). */
   contentId?: string
   /** A share link's token (the dashboard's Share dialog → Embed). Public: anyone holding it sees the view. */
   token?: string
@@ -90,8 +91,8 @@ export interface DataSquaresEmbedProps {
   style?: CSSProperties
   /** Accessible name for the iframe (default "DataSquares dashboard"). */
   title?: string
-  /** The embed authorized and rendered. */
-  onReady?: (info: { contentType: 'dashboard' | 'report'; pages: Array<{ id: string; name: string }> }) => void
+  /** The embed authorized and rendered: a dashboard (with its pages), a report, or a presentation (in present mode). */
+  onReady?: (info: { contentType: EmbedContentType; pages: Array<{ id: string; name: string }> }) => void
   /** The embed could not render (bad token, blocked origin, network, password). */
   onError?: (error: { kind: EmbedErrorKind }) => void
   /** The visible dashboard page changed. */

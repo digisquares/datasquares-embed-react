@@ -1,8 +1,8 @@
 # @digisquares/datasquares-embed-react
 
-React SDK for embedding DataSquares dashboards and reports: the `<DataSquaresEmbed>`
-component, typed events, host-side controls, and a server-side signer for each
-person's short-lived embed token.
+React SDK for embedding DataSquares dashboards, reports and presentations: the
+`<DataSquaresEmbed>` component, typed events, host-side controls, and a
+server-side signer for each person's short-lived embed token.
 
 ## Install
 
@@ -87,9 +87,14 @@ session has ended, until the token arrives, which then starts it.
   paid from your company's bought credits, with per-person and per-tenant
   budgets.
 
+A presentation embeds the same way: name it in the token's `content`
+(`{ type: 'presentation', id }`, one of the app's content). It shows its
+published version in present mode, never the editor, and has no Ask AI.
+
 ## A share link
 
-A dashboard's public share link embeds with its token and id:
+A dashboard's public share link embeds with its token and id, and so does a
+presentation's link (made under its **Share** → **Embed**):
 
 ```tsx
 <DataSquaresEmbed baseUrl="https://app.datasquares.ai" contentId="your-dashboard-id" token={shareToken} />
@@ -116,7 +121,7 @@ const { pageId, params } = await embed.current!.getState()
 
 | Prop | Fires when |
 |---|---|
-| `onReady` | the embed authorized and rendered (`contentType`, `pages`) |
+| `onReady` | the embed authorized and rendered: `contentType` (`dashboard`, `report` or `presentation`) and `pages` (a dashboard's; none for a report or a presentation) |
 | `onError` | it could not render — `invalid`, `forbidden`, `network`, `password-required`, `expired` (a session ended with no new token) |
 | `onPageChange` | the visible dashboard page changed |
 | `onPointClick` | a chart data point was clicked |

@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRef } from 'react'
 import { render, cleanup, act } from '@testing-library/react'
-import { DataSquaresEmbed, buildEmbedUrl, buildSessionEmbedUrl, type DataSquaresEmbedHandle } from '../src/DataSquaresEmbed.js'
+import { DataSquaresEmbed, buildEmbedUrl, buildSessionEmbedUrl, type DataSquaresEmbedHandle, type DataSquaresEmbedProps } from '../src/DataSquaresEmbed.js'
 import { isEmbedOutMessage } from '../src/protocol.js'
 
 const BASE = 'https://app.datasquares.ai'
@@ -257,5 +257,25 @@ describe('isEmbedOutMessage: the token request', () => {
     expect(isEmbedOutMessage({ type: 'ds:token-request', version: 1, reason: 'start' })).toBe(true)
     expect(isEmbedOutMessage({ type: 'ds:token-request', version: 1 })).toBe(false)
     expect(isEmbedOutMessage({ type: 'ds:token', version: 1, token: 'x' })).toBe(false) // inbound type
+  })
+})
+
+// ── PRES-37: a presentation embeds too (in present mode), and says so when it is ready ──────────────────────────────
+
+describe('an embedded presentation', () => {
+  it('is ready as a presentation: the host hears it, with no pages', () => {
+    const { iframe, onReady } = renderEmbed({ contentId: 'deck-1' })
+    dispatch({ type: 'ds:ready', version: 1, contentType: 'presentation', pages: [] }, BASE, iframe.contentWindow)
+    expect(onReady).toHaveBeenCalledWith({ contentType: 'presentation', pages: [] })
+  })
+
+  it('is a ready message the guard accepts; any other kind is still refused', () => {
+    expect(isEmbedOutMessage({ type: 'ds:ready', version: 1, contentType: 'presentation', pages: [] })).toBe(true)
+    expect(isEmbedOutMessage({ type: 'ds:ready', version: 1, contentType: 'deck', pages: [] })).toBe(false)
+  })
+
+  it('onReady names the kinds an embed can be', () => {
+    const kinds: Array<Parameters<NonNullable<DataSquaresEmbedProps['onReady']>>[0]['contentType']> = ['dashboard', 'report', 'presentation']
+    expect(kinds).toHaveLength(3)
   })
 })

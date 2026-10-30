@@ -20,12 +20,18 @@ export interface EmbedFilter {
   [key: string]: unknown
 }
 
+/** What an embed shows: a dashboard, a report, or a presentation (in present mode). */
+export type EmbedContentType = 'dashboard' | 'report' | 'presentation'
+
+const CONTENT_TYPES: ReadonlySet<unknown> = new Set<EmbedContentType>(['dashboard', 'report', 'presentation'])
+
 // ── Embed → host (events the SDK surfaces as callbacks) ─────────────────
 
 export interface EmbedReadyMessage {
   type: 'ds:ready'
   version: typeof EMBED_PROTOCOL_VERSION
-  contentType: 'dashboard' | 'report'
+  contentType: EmbedContentType
+  /** A dashboard's pages; none for a report, a one-page dashboard or a presentation. */
   pages: Array<{ id: string; name: string }>
 }
 
@@ -155,7 +161,7 @@ export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
     case 'ds:resize':
       return typeof msg.height === 'number' && Number.isFinite(msg.height) && msg.height >= 0
     case 'ds:ready':
-      return (msg.contentType === 'dashboard' || msg.contentType === 'report') && Array.isArray(msg.pages)
+      return CONTENT_TYPES.has(msg.contentType) && Array.isArray(msg.pages)
     case 'ds:error':
       return typeof msg.kind === 'string'
     case 'ds:page-change':

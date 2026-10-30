@@ -5,6 +5,7 @@ export {
   isEmbedOutMessage,
 } from './protocol.js'
 export type {
+  EmbedContentType,
   EmbedErrorKind,
   EmbedFilter,
   EmbedInMessage,

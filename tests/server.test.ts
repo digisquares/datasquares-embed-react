@@ -6,7 +6,7 @@
  * a fresh nonce each time. The signature is checked here with Web Crypto's HMAC, as DataSquares checks it.
  */
 import { describe, expect, it } from 'vitest'
-import { signEmbedToken } from '../src/server.js'
+import { signEmbedToken, type SignEmbedTokenInput } from '../src/server.js'
 
 const KEY = { clientId: 'dsapp_0123456789abcdef01234567', keyId: '5d0c1a52-2a4c-4e0b-9f53-6f4c3b9a1e01', secret: 'dssk_' + 'k'.repeat(43) }
 const fromB64url = (part: string) => Uint8Array.from(atob(part.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
@@ -57,5 +57,13 @@ describe('signEmbedToken (server only)', () => {
     await expect(signEmbedToken({ ...base, ttlSeconds: 601 })).rejects.toThrow(/10 minutes/)
     const ten = decode((await signEmbedToken({ ...base, ttlSeconds: 600 })).split('.')[1]!)
     expect(ten.exp - ten.iat).toBe(600)
+  })
+})
+
+describe('signEmbedToken: a presentation', () => {
+  it('signs a session that opens a presentation (PRES-37), as one that opens a dashboard or a report', async () => {
+    const content: SignEmbedTokenInput['content'] = { type: 'presentation', id: 'c0ffee00-2a4c-4e0b-9f53-6f4c3b9a1e04' }
+    const claims = decode((await signEmbedToken({ ...KEY, sub: 'person-7', content })).split('.')[1]!)
+    expect(claims.content).toEqual({ type: 'presentation', id: 'c0ffee00-2a4c-4e0b-9f53-6f4c3b9a1e04' })
   })
 })

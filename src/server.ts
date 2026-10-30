@@ -35,8 +35,8 @@ export interface SignEmbedTokenInput {
    * (every rule needs its attribute; an attribute without a rule is refused).
    */
   attributes?: Record<string, string | number | boolean | Array<string | number>>
-  /** The dashboard or report the session opens (one of the app's content). */
-  content: { type: 'dashboard' | 'report'; id: string }
+  /** The dashboard, report or presentation the session opens (one of the app's content; a presentation in present mode). */
+  content: { type: 'dashboard' | 'report' | 'presentation'; id: string }
   /** Seconds until it expires: 300 by default, 600 at most. */
   ttlSeconds?: number
   /** The clock, in milliseconds (tests). */
