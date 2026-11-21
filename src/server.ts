@@ -45,6 +45,69 @@ export interface SignEmbedTokenInput {
 
 const MAX_TTL_SECONDS = 600
 
+// What DataSquares checks when it reads the token (a mirror: refusing here says what is wrong on YOUR server, in words,
+// where an embed that is handed a bad token only shows that it could not start).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ATTRIBUTE_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/
+const RESERVED_ATTRIBUTE_NAMES: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+const CONTENT_TYPES: ReadonlySet<unknown> = new Set(['dashboard', 'report', 'presentation'])
+const MAX_ID_CHARS = 255
+
+/** An input `signEmbedToken` cannot sign: `field` names which, and the message says why. */
+export class EmbedTokenInputError extends TypeError {
+  readonly field: string
+  constructor(field: string, message: string) {
+    super(`signEmbedToken: ${field} ${message}`)
+    this.name = 'EmbedTokenInputError'
+    this.field = field
+  }
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const isText = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+function checkInput(input: SignEmbedTokenInput): void {
+  if (!isRecord(input)) throw new EmbedTokenInputError('input', 'must be an object.')
+  if (!isText(input.clientId)) throw new EmbedTokenInputError('clientId', "must be the embed app's client id.")
+  if (typeof input.keyId !== 'string' || !UUID_RE.test(input.keyId)) {
+    throw new EmbedTokenInputError('keyId', "must be the app key's id, a UUID (shown with the key in Administration → Settings → Embedding).")
+  }
+  if (!isText(input.secret)) throw new EmbedTokenInputError('secret', "must be the app key's secret.")
+  if (!isText(input.sub) || input.sub.length > MAX_ID_CHARS) {
+    throw new EmbedTokenInputError('sub', `must be the person's id: text, 1 to ${MAX_ID_CHARS} characters.`)
+  }
+  if (input.tenant !== undefined && (typeof input.tenant !== 'string' || input.tenant.length > MAX_ID_CHARS)) {
+    throw new EmbedTokenInputError('tenant', `must be text of at most ${MAX_ID_CHARS} characters.`)
+  }
+  if (input.role !== undefined && input.role !== 'viewer' && input.role !== 'viewer_ai') {
+    throw new EmbedTokenInputError('role', "must be 'viewer' or 'viewer_ai'.")
+  }
+  const content = input.content as unknown
+  if (!isRecord(content) || !CONTENT_TYPES.has(content.type)) {
+    throw new EmbedTokenInputError('content', "must be { type: 'dashboard' | 'report' | 'presentation', id }.")
+  }
+  if (typeof content.id !== 'string' || !UUID_RE.test(content.id)) {
+    throw new EmbedTokenInputError('content.id', 'must be the content\'s id, a UUID.')
+  }
+  if (input.attributes !== undefined) {
+    if (!isRecord(input.attributes)) throw new EmbedTokenInputError('attributes', 'must be an object of names and values.')
+    for (const [name, value] of Object.entries(input.attributes)) {
+      if (!ATTRIBUTE_NAME_RE.test(name) || RESERVED_ATTRIBUTE_NAMES.has(name)) {
+        throw new EmbedTokenInputError(
+          `attributes.${name}`,
+          'is not an attribute name: a letter or _ first, then letters, digits, _ . or -, 64 at most (and not __proto__, constructor or prototype).',
+        )
+      }
+      const plain = typeof value === 'string' || typeof value === 'boolean' || isFiniteNumber(value)
+      const list = Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'string' || isFiniteNumber(v))
+      if (!plain && !list) {
+        throw new EmbedTokenInputError(`attributes.${name}`, 'must be text, a finite number, true or false, or a non-empty list of text and numbers.')
+      }
+    }
+  }
+}
+
 function base64url(bytes: Uint8Array): string {
   let binary = ''
   for (const b of bytes) binary += String.fromCharCode(b)
@@ -61,6 +124,7 @@ function nonce(): string {
 
 /** Sign one person's short-lived embed token with your embed app's key. */
 export async function signEmbedToken(input: SignEmbedTokenInput): Promise<string> {
+  checkInput(input)
   const ttl = input.ttlSeconds ?? 300
   if (!Number.isInteger(ttl) || ttl < 1 || ttl > MAX_TTL_SECONDS) {
     throw new Error(`An embed token lives from 1 second to 10 minutes (${MAX_TTL_SECONDS} seconds); ttlSeconds was ${ttl}.`)

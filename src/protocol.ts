@@ -136,6 +136,9 @@ export interface TokenCommand {
 
 export type EmbedInMessage = SetParamsCommand | SetPageCommand | RefreshCommand | GetStateCommand | TokenCommand
 
+/** The longest token the embed accepts in a `ds:token` (it drops a longer or an empty one). */
+export const MAX_EMBED_TOKEN_CHARS = 8192
+
 const OUT_TYPES = new Set([
   'ds:ready',
   'ds:resize',
@@ -147,21 +150,31 @@ const OUT_TYPES = new Set([
   'ds:token-request',
 ])
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+const isPage = (p: unknown): boolean => isRecord(p) && typeof p.id === 'string' && typeof p.name === 'string'
+
 /**
  * Structural guard over untrusted postMessage data. The host validates source
  * and origin before this runs, but the shape still gets checked field-by-field:
  * any script inside a compromised embed page could post arbitrary data from
  * the right window at the right origin.
+ *
+ * A message of another protocol version is refused: a breaking change bumps
+ * EMBED_PROTOCOL_VERSION, and an SDK that does not know the new shapes must
+ * not read them as the old ones. An error `kind` is any text, though — a kind
+ * added later still reaches `onError` rather than vanishing.
  */
 export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
-  if (typeof data !== 'object' || data === null) return false
-  const msg = data as Record<string, unknown>
+  if (!isRecord(data)) return false
+  const msg = data
+  if (msg.version !== EMBED_PROTOCOL_VERSION) return false
   if (typeof msg.type !== 'string' || !OUT_TYPES.has(msg.type)) return false
   switch (msg.type) {
     case 'ds:resize':
       return typeof msg.height === 'number' && Number.isFinite(msg.height) && msg.height >= 0
     case 'ds:ready':
-      return CONTENT_TYPES.has(msg.contentType) && Array.isArray(msg.pages)
+      return CONTENT_TYPES.has(msg.contentType) && Array.isArray(msg.pages) && msg.pages.every(isPage)
     case 'ds:error':
       return typeof msg.kind === 'string'
     case 'ds:page-change':
@@ -169,9 +182,14 @@ export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
     case 'ds:point-click':
       return typeof msg.cardId === 'string' && typeof msg.value === 'string'
     case 'ds:filter-change':
-      return Array.isArray(msg.filters)
+      return Array.isArray(msg.filters) && msg.filters.every(isRecord)
     case 'ds:state':
-      return typeof msg.state === 'object' && msg.state !== null
+      return (
+        (msg.requestId === undefined || typeof msg.requestId === 'string') &&
+        isRecord(msg.state) &&
+        (msg.state.pageId === null || typeof msg.state.pageId === 'string') &&
+        isRecord(msg.state.params)
+      )
     case 'ds:token-request':
       return msg.reason === 'start' || msg.reason === 'renew'
     default:

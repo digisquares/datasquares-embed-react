@@ -1,3 +1,4 @@
+'use client'
 /**
  * <DataSquaresEmbed> — the React component the DataSquares Embedded product
  * page describes: an iframe wrapper with typed events and host-side control.
@@ -17,6 +18,14 @@
  *
  * The embed side independently refuses hosts that are not on the workspace's
  * allowed-domains list — this component doesn't (and couldn't) bypass that.
+ *
+ * ── Commands before the embed listens ───────────────────────────────────
+ * A command posted while the frame is still loading reaches no one: the
+ * embed's bridge only listens once its page has mounted. So commands wait in
+ * a queue until the embed first speaks (it reports its height as soon as it
+ * mounts, before anything else), and go out then. A new `src` loads a new
+ * page, and commands wait again. Only the last `setParams`, `setPage` and
+ * `refresh` wait — each replaces the one before, as it would in the embed.
  *
  * ── Two keys: a person's signed token ───────────────────────────────────
  * For dashboards embedded in your own product for your own people, pass
@@ -46,14 +55,22 @@ import {
   type CSSProperties,
 } from 'react'
 import {
+  EMBED_PROTOCOL_VERSION,
+  MAX_EMBED_TOKEN_CHARS,
   isEmbedOutMessage,
   type EmbedContentType,
   type EmbedErrorKind,
   type EmbedFilter,
   type EmbedInMessage,
-  type EmbedReadyMessage,
   type EmbedState,
 } from './protocol.js'
+import { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin as originOf } from './urls.js'
+
+/** What `onError` hears. `cause` is set only when your own `getToken` failed (it threw, or gave no usable token). */
+export interface EmbedError {
+  kind: EmbedErrorKind
+  cause?: unknown
+}
 
 export interface DataSquaresEmbedProps {
   /** Your DataSquares app URL, e.g. `https://app.datasquares.ai`. */
@@ -87,14 +104,20 @@ export interface DataSquaresEmbedProps {
   autoResize?: boolean
   /** Fixed/initial iframe height (default 600). */
   height?: number | string
+  /** The iframe's `loading`: `lazy` waits until it nears the viewport (default `eager`). */
+  loading?: 'eager' | 'lazy'
   className?: string
   style?: CSSProperties
   /** Accessible name for the iframe (default "DataSquares dashboard"). */
   title?: string
   /** The embed authorized and rendered: a dashboard (with its pages), a report, or a presentation (in present mode). */
   onReady?: (info: { contentType: EmbedContentType; pages: Array<{ id: string; name: string }> }) => void
-  /** The embed could not render (bad token, blocked origin, network, password). */
-  onError?: (error: { kind: EmbedErrorKind }) => void
+  /**
+   * The embed could not render (bad token, blocked origin, network, password,
+   * an ended session), or your `getToken` failed — then `kind` is `invalid`
+   * and `cause` is what it threw.
+   */
+  onError?: (error: EmbedError) => void
   /** The visible dashboard page changed. */
   onPageChange?: (pageId: string) => void
   /** A chart data point was clicked. */
@@ -104,61 +127,23 @@ export interface DataSquaresEmbedProps {
 }
 
 export interface DataSquaresEmbedHandle {
-  /** Override dashboard parameter values (wins over the URL's p_* defaults). */
+  /** Override dashboard parameter values (wins over the URL's p_* defaults). Waits until the embed listens. */
   setParams: (params: Record<string, unknown>) => void
-  /** Switch the visible dashboard page. */
+  /** Switch the visible dashboard page. Waits until the embed listens. */
   setPage: (pageId: string) => void
-  /** Re-fetch the shared content. */
+  /** Re-fetch the shared content. Waits until the embed listens. */
   refresh: () => void
-  /** Current embed state (active page + effective params). */
+  /** Current embed state (active page + effective params). Rejects when the embed has not answered within `timeoutMs` (default 5000). */
   getState: (timeoutMs?: number) => Promise<EmbedState>
 }
 
-/**
- * The session embed's URL: the options only. The person's signed token is
- * handed over by postMessage when the embed asks for it, never in the URL.
- */
-export function buildSessionEmbedUrl(props: {
-  baseUrl: string
-  theme?: string
-  toolbar?: boolean
-  primaryColor?: string
-  logoUrl?: string
-  params?: Record<string, string | number | boolean>
-}): string {
-  const url = new URL('/embed/session', props.baseUrl)
-  if (props.theme) url.searchParams.set('theme', props.theme)
-  if (props.toolbar !== undefined) url.searchParams.set('toolbar', String(props.toolbar))
-  if (props.primaryColor) url.searchParams.set('primaryColor', props.primaryColor)
-  if (props.logoUrl) url.searchParams.set('logoUrl', props.logoUrl)
-  for (const [key, value] of Object.entries(props.params ?? {})) {
-    url.searchParams.set(`p_${key}`, String(value))
-  }
-  return url.toString()
+interface PendingState {
+  resolve: (state: EmbedState) => void
+  timer: ReturnType<typeof setTimeout>
 }
 
-/** Build a share link's embed URL. Exported for tests; not part of the public API surface. */
-export function buildEmbedUrl(props: {
-  baseUrl: string
-  contentId: string
-  token: string
-  theme?: string
-  toolbar?: boolean
-  primaryColor?: string
-  logoUrl?: string
-  params?: Record<string, string | number | boolean>
-}): string {
-  const url = new URL(`/embed/${encodeURIComponent(props.contentId)}`, props.baseUrl)
-  url.searchParams.set('token', props.token)
-  if (props.theme) url.searchParams.set('theme', props.theme)
-  if (props.toolbar !== undefined) url.searchParams.set('toolbar', String(props.toolbar))
-  if (props.primaryColor) url.searchParams.set('primaryColor', props.primaryColor)
-  if (props.logoUrl) url.searchParams.set('logoUrl', props.logoUrl)
-  for (const [key, value] of Object.entries(props.params ?? {})) {
-    url.searchParams.set(`p_${key}`, String(value))
-  }
-  return url.toString()
-}
+/** Commands of these kinds replace a waiting one of the same kind: only the last matters to the embed. */
+const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-params', 'ds:set-page', 'ds:refresh'])
 
 let requestCounter = 0
 
@@ -176,6 +161,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       params,
       autoResize = true,
       height = 600,
+      loading,
       className,
       style,
       title = 'DataSquares dashboard',
@@ -184,19 +170,22 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
     const iframeRef = useRef<HTMLIFrameElement | null>(null)
     const [reportedHeight, setReportedHeight] = useState<number | null>(null)
 
-    // The one origin this component will talk to or listen for.
-    const embedOrigin = useMemo(() => new URL(baseUrl).origin, [baseUrl])
+    // The one origin this component will talk to or listen for (throws, with words, on a bad baseUrl).
+    const embedOrigin = useMemo(() => originOf(baseUrl), [baseUrl])
 
     const sessionMode = typeof getToken === 'function'
     if (!sessionMode && (!token || !contentId)) {
       throw new Error("DataSquaresEmbed: pass getToken (each person's signed token, from your server), or token and contentId (a share link).")
     }
+    // A string key, so an inline `params={{ … }}` object does not rebuild the URL each render.
+    const paramsKey = params ? JSON.stringify(params) : ''
     const src = useMemo(
       () =>
         sessionMode
           ? buildSessionEmbedUrl({ baseUrl, theme, toolbar, primaryColor, logoUrl, params })
           : buildEmbedUrl({ baseUrl, contentId: contentId!, token: token!, theme, toolbar, primaryColor, logoUrl, params }),
-      [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, params],
+      // `params` is keyed by its contents (paramsKey), not its identity.
+      [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, paramsKey],
     )
 
     // The current getToken, so the message listener below binds once per origin.
@@ -215,9 +204,35 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
     }
 
     // Pending ds:get-state requests by requestId.
-    const pendingStateRef = useRef(new Map<string, (state: EmbedState) => void>())
+    const pendingStateRef = useRef(new Map<string, PendingState>())
+
+    // Whether the page in the frame has spoken (so its bridge listens), and the commands waiting for it to.
+    const liveRef = useRef(false)
+    const queueRef = useRef<EmbedInMessage[]>([])
+
+    const send = useCallback(
+      (msg: EmbedInMessage) => {
+        // Exact target origin: if the iframe was navigated off DataSquares,
+        // the command is dropped by the browser instead of delivered to
+        // whatever page now occupies the frame.
+        iframeRef.current?.contentWindow?.postMessage(msg, embedOrigin)
+      },
+      [embedOrigin],
+    )
+
+    const flush = useCallback(() => {
+      const waiting = queueRef.current
+      queueRef.current = []
+      for (const msg of waiting) send(msg)
+    }, [send])
+
+    // A new src is a new page in the frame: it must speak again before commands go out.
+    useEffect(() => {
+      liveRef.current = false
+    }, [src, embedOrigin])
 
     useEffect(() => {
+      let disposed = false
       const listener = (event: MessageEvent) => {
         // Source first: pins WHICH window (this exact iframe — two embeds on a
         // page must not cross), then origin pins WHO runs in it, then shape.
@@ -225,14 +240,17 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         if (event.origin !== embedOrigin) return
         if (!isEmbedOutMessage(event.data)) return
 
+        if (!liveRef.current) {
+          liveRef.current = true
+          flush()
+        }
+
         const msg = event.data
         const cb = callbacksRef.current
         switch (msg.type) {
-          case 'ds:ready': {
-            const ready = msg as EmbedReadyMessage
-            cb.onReady?.({ contentType: ready.contentType, pages: ready.pages })
+          case 'ds:ready':
+            cb.onReady?.({ contentType: msg.contentType, pages: msg.pages.map((p) => ({ id: p.id, name: p.name })) })
             break
-          }
           case 'ds:resize':
             setReportedHeight(msg.height)
             break
@@ -251,23 +269,36 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
           case 'ds:token-request': {
             const ask = getTokenRef.current
             if (!ask) break
-            const target = iframeRef.current?.contentWindow
-            void ask().then(
-              (signed) => {
-                // Exact origin: a frame navigated off DataSquares never receives the person's token.
-                if (typeof signed === 'string' && signed) target?.postMessage({ type: 'ds:token', version: 1, token: signed }, embedOrigin)
-                else cb.onError?.({ kind: 'invalid' })
-              },
-              () => cb.onError?.({ kind: 'invalid' }),
-            )
+            const target = iframeRef.current.contentWindow
+            const fail = (cause: unknown) => {
+              if (!disposed) callbacksRef.current.onError?.({ kind: 'invalid', cause })
+            }
+            let asked: Promise<string>
+            try {
+              asked = Promise.resolve(ask())
+            } catch (err) {
+              fail(err)
+              break
+            }
+            void asked.then((signed) => {
+              // Unmounted, or the frame now holds another origin's listener: the answer goes nowhere.
+              if (disposed) return
+              if (typeof signed !== 'string' || signed.length === 0 || signed.length > MAX_EMBED_TOKEN_CHARS) {
+                fail(new TypeError(`getToken must resolve to a signed token (1 to ${MAX_EMBED_TOKEN_CHARS} characters).`))
+                return
+              }
+              // Exact origin: a frame navigated off DataSquares never receives the person's token.
+              target?.postMessage({ type: 'ds:token', version: EMBED_PROTOCOL_VERSION, token: signed }, embedOrigin)
+            }, fail)
             break
           }
           case 'ds:state': {
             if (msg.requestId) {
-              const resolve = pendingStateRef.current.get(msg.requestId)
-              if (resolve) {
+              const pending = pendingStateRef.current.get(msg.requestId)
+              if (pending) {
                 pendingStateRef.current.delete(msg.requestId)
-                resolve(msg.state)
+                clearTimeout(pending.timer)
+                pending.resolve(msg.state)
               }
             }
             break
@@ -275,35 +306,41 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         }
       }
       window.addEventListener('message', listener)
-      return () => window.removeEventListener('message', listener)
-    }, [embedOrigin])
+      return () => {
+        disposed = true
+        window.removeEventListener('message', listener)
+      }
+    }, [embedOrigin, flush])
 
     const post = useCallback(
       (msg: EmbedInMessage) => {
-        // Exact target origin: if the iframe was navigated off DataSquares,
-        // the command is dropped by the browser instead of delivered to
-        // whatever page now occupies the frame.
-        iframeRef.current?.contentWindow?.postMessage(msg, embedOrigin)
+        if (liveRef.current) {
+          send(msg)
+          return
+        }
+        const waiting = LAST_WINS.has(msg.type) ? queueRef.current.filter((m) => m.type !== msg.type) : queueRef.current
+        queueRef.current = [...waiting, msg]
       },
-      [embedOrigin],
+      [send],
     )
 
     useImperativeHandle(
       ref,
       (): DataSquaresEmbedHandle => ({
-        setParams: (p) => post({ type: 'ds:set-params', version: 1, params: p }),
-        setPage: (pageId) => post({ type: 'ds:set-page', version: 1, pageId }),
-        refresh: () => post({ type: 'ds:refresh', version: 1 }),
+        setParams: (p) => post({ type: 'ds:set-params', version: EMBED_PROTOCOL_VERSION, params: p }),
+        setPage: (pageId) => post({ type: 'ds:set-page', version: EMBED_PROTOCOL_VERSION, pageId }),
+        refresh: () => post({ type: 'ds:refresh', version: EMBED_PROTOCOL_VERSION }),
         getState: (timeoutMs = 5000) => {
           const requestId = `dsq-${Date.now()}-${++requestCounter}`
           return new Promise<EmbedState>((resolve, reject) => {
-            pendingStateRef.current.set(requestId, resolve)
-            setTimeout(() => {
+            const timer = setTimeout(() => {
               if (pendingStateRef.current.delete(requestId)) {
+                queueRef.current = queueRef.current.filter((m) => !(m.type === 'ds:get-state' && m.requestId === requestId))
                 reject(new Error('DataSquares embed did not answer ds:get-state — is it loaded and same-version?'))
               }
             }, timeoutMs)
-            post({ type: 'ds:get-state', version: 1, requestId })
+            pendingStateRef.current.set(requestId, { resolve, timer })
+            post({ type: 'ds:get-state', version: EMBED_PROTOCOL_VERSION, requestId })
           })
         },
       }),
@@ -316,6 +353,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         src={src}
         title={title}
         className={className}
+        loading={loading}
         style={{
           width: '100%',
           border: 0,

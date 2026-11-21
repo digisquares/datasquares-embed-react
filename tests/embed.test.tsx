@@ -10,7 +10,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRef } from 'react'
 import { render, cleanup, act } from '@testing-library/react'
-import { DataSquaresEmbed, buildEmbedUrl, buildSessionEmbedUrl, type DataSquaresEmbedHandle, type DataSquaresEmbedProps } from '../src/DataSquaresEmbed.js'
+import { DataSquaresEmbed, type DataSquaresEmbedHandle, type DataSquaresEmbedProps } from '../src/DataSquaresEmbed.js'
+import { buildEmbedUrl, buildSessionEmbedUrl } from '../src/urls.js'
 import { isEmbedOutMessage } from '../src/protocol.js'
 
 const BASE = 'https://app.datasquares.ai'
@@ -131,7 +132,9 @@ describe('<DataSquaresEmbed> message validation', () => {
   it('posts commands to the exact embed origin', () => {
     const { ref, iframe } = renderEmbed()
     const post = vi.fn()
-    Object.defineProperty(iframe, 'contentWindow', { value: { postMessage: post } })
+    const cw = { postMessage: post }
+    Object.defineProperty(iframe, 'contentWindow', { value: cw })
+    dispatch({ type: 'ds:resize', version: 1, height: 600 }, BASE, cw) // the embed is up
 
     act(() => ref.current!.setPage('p2'))
     expect(post).toHaveBeenCalledWith({ type: 'ds:set-page', version: 1, pageId: 'p2' }, BASE)
@@ -148,6 +151,7 @@ describe('<DataSquaresEmbed> message validation', () => {
     const post = vi.fn()
     const cw = { postMessage: post }
     Object.defineProperty(iframe, 'contentWindow', { value: cw })
+    dispatch({ type: 'ds:resize', version: 1, height: 600 }, BASE, cw) // the embed is up
 
     let statePromise!: Promise<unknown>
     act(() => {
@@ -242,7 +246,7 @@ describe('<DataSquaresEmbed getToken>', () => {
       throw new Error('your server said no')
     })
     dispatch({ type: 'ds:token-request', version: 1, reason: 'start' }, BASE, cw)
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith({ kind: 'invalid' }))
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith({ kind: 'invalid', cause: expect.objectContaining({ message: 'your server said no' }) }))
     expect(post).not.toHaveBeenCalled()
   })
 

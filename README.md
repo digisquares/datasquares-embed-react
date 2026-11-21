@@ -16,6 +16,9 @@ Or straight from the repository (builds on install via the `prepare` script):
 npm install github:digisquares/datasquares-embed-react
 ```
 
+React 18 or 19. The package is ESM; `signEmbedToken` runs on Node 20+, Deno,
+Bun and edge runtimes (Web Crypto, no dependencies).
+
 ## Two keys: each person, on your site
 
 To show dashboards inside your own product, to your own people, make an embed
@@ -71,6 +74,12 @@ exact DataSquares origin, never in a URL. The embed waits ten seconds for it:
 a `getToken` slower than that shows that the view needs a token, or that its
 session has ended, until the token arrives, which then starts it.
 
+`signEmbedToken` checks its input the way DataSquares will check the token,
+and throws an `EmbedTokenInputError` (its `field` names the input) on your
+server — a key id or content id that is not a UUID, an empty `sub`, an
+attribute name or value DataSquares refuses — instead of signing a token the
+embed can only show it could not start.
+
 - **Internal embedding** (Business): `sub` is the person's DataSquares email or
   SCIM id; everything is then their own: role, row-level security, AI credits.
   They open only what their role, or a share of a dashboard to them, opens in
@@ -105,6 +114,42 @@ A share token is a credential: anyone holding it sees the view.
 The iframe auto-resizes to its content. Turn that off with `autoResize={false}`
 and a fixed `height`.
 
+## Next.js and server components
+
+The component is a client component (it ships `'use client'`), so a server
+component can render it — but `getToken` is a function, which a server
+component cannot pass. Wrap it in a client component of your own:
+
+```tsx
+'use client'
+import { DataSquaresEmbed } from '@digisquares/datasquares-embed-react'
+
+export function Analytics() {
+  return <DataSquaresEmbed baseUrl="https://app.datasquares.ai" getToken={() => fetch('/analytics-token').then((r) => r.text())} />
+}
+```
+
+`buildEmbedUrl` and `buildSessionEmbedUrl` are plain functions in their own
+module and can be called from server code. Sign tokens in a route handler with
+`@digisquares/datasquares-embed-react/server`.
+
+## Props
+
+| Prop | Default | |
+|---|---|---|
+| `baseUrl` | — | Your DataSquares app URL (http or https). The one origin the component talks to. |
+| `getToken` | — | Each person's signed token, from your server (two keys). Takes the place of `contentId` and `token`. |
+| `contentId`, `token` | — | A share link's content id and token. |
+| `theme` | the embed's | `light` or `dark`. |
+| `toolbar` | `true` | Show the embed toolbar. |
+| `primaryColor`, `logoUrl` | — | White-label color and https logo. |
+| `params` | — | Initial parameter values (`p_*` in the URL). An inline object is fine: the frame reloads only when the values change. |
+| `autoResize` | `true` | Grow the iframe to its content. |
+| `height` | `600` | Initial or fixed height. |
+| `loading` | `eager` | `lazy` defers loading until the frame nears the viewport. |
+| `title` | `DataSquares dashboard` | The iframe's accessible name. |
+| `className`, `style` | — | On the iframe. |
+
 ## Controlling the embed
 
 The `ref` handle sends typed commands over the versioned `ds:*` postMessage
@@ -114,18 +159,36 @@ protocol:
 embed.current?.setParams({ region: 'east' })   // wins over the URL's p_* defaults
 embed.current?.setPage('page-id')
 embed.current?.refresh()
-const { pageId, params } = await embed.current!.getState()
+const { pageId, params } = await embed.current!.getState()   // rejects after 5 s (getState(ms) to change)
 ```
+
+Commands can be sent as soon as the ref is set, e.g. from an effect on mount:
+until the page in the frame is listening, they wait, and go out when it first
+speaks. Only the last `setParams`, `setPage` and `refresh` wait — each replaces
+the one before. When `src` changes (another dashboard, theme or params) the new
+page is waited for the same way.
 
 ## Events
 
 | Prop | Fires when |
 |---|---|
 | `onReady` | the embed authorized and rendered: `contentType` (`dashboard`, `report` or `presentation`) and `pages` (a dashboard's; none for a report or a presentation) |
-| `onError` | it could not render — `invalid`, `forbidden`, `network`, `password-required`, `expired` (a session ended with no new token) |
+| `onError` | it could not render — `invalid`, `forbidden`, `network`, `password-required`, `expired` (a session ended with no new token) — or your `getToken` failed: then `kind` is `invalid` and `cause` is what it threw (or a `TypeError` for an empty or over-long token) |
 | `onPageChange` | the visible dashboard page changed |
 | `onPointClick` | a chart data point was clicked |
 | `onFilterChange` | the cross-filter set changed (chart click, slicer, clear) |
+
+## Upgrading from 0.2
+
+Nothing to change. What behaves differently:
+
+- Commands sent before the embed listens now wait and are delivered, where
+  they used to be dropped by the browser.
+- `onError` may carry `cause` (your `getToken` failed).
+- `signEmbedToken` throws `EmbedTokenInputError` for input DataSquares would
+  refuse, which it used to sign.
+- Messages of another protocol version, and ones whose pages, filters or
+  state are malformed, are ignored.
 
 ## Upgrading from 0.1
 
@@ -155,6 +218,8 @@ for the host page:
   other frame can speak as the embed.
 - Commands are posted to that exact origin, never `'*'` — if the frame is
   navigated elsewhere, commands are dropped by the browser, not delivered.
-- Message payloads are structurally validated before any handler runs.
+- Message payloads are structurally validated before any handler runs,
+  including the protocol version and the pages, filters and state inside them.
+- `baseUrl` must be http(s): a `javascript:` or `data:` base is refused.
 - A token request is answered only for this iframe at the DataSquares origin,
   and the signed token is posted to that exact origin.
