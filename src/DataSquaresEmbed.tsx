@@ -27,6 +27,13 @@
  * page, and commands wait again. Only the last `setParams`, `setPage` and
  * `refresh` wait — each replaces the one before, as it would in the embed.
  *
+ * ── An embed that never speaks ──────────────────────────────────────────
+ * The frame loads but its page never says a word when the embed cannot run
+ * there: a wrong `baseUrl`, a host page whose Content-Security-Policy keeps
+ * DataSquares out of frames, a `no-referrer` policy that hides the host (the
+ * embed then stays silent by design), or a network that never answers. The
+ * host would hear nothing at all; after `loadTimeoutMs` it hears `timeout`.
+ *
  * ── Two keys: a person's signed token ───────────────────────────────────
  * For dashboards embedded in your own product for your own people, pass
  * `getToken`: a function that asks YOUR server for a short-lived token it
@@ -53,6 +60,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from 'react'
 import {
   EMBED_PROTOCOL_VERSION,
@@ -65,12 +73,25 @@ import {
   type EmbedState,
 } from './protocol.js'
 import { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin as originOf } from './urls.js'
+import { DEV, isInsecureRemote, warnOnce } from './dev.js'
 
-/** What `onError` hears. `cause` is set only when your own `getToken` failed (it threw, or gave no usable token). */
+/**
+ * What `onError` hears: one of the embed's own kinds, or `timeout` — the frame loaded but the embed never spoke within
+ * `loadTimeoutMs` (it cannot run there; see the README's troubleshooting).
+ */
+export type EmbedHostErrorKind = EmbedErrorKind | 'timeout'
+
+/**
+ * What `onError` hears. `cause` is set when your own `getToken` failed (it threw, or gave no usable token; `kind` is
+ * then `invalid`) and on a `timeout` (an Error naming the likely reasons).
+ */
 export interface EmbedError {
-  kind: EmbedErrorKind
+  kind: EmbedHostErrorKind
   cause?: unknown
 }
+
+/** `loading` until the embed has rendered (`ready`) or could not (`error`); a new `src` or `reload()` loads again. */
+export type EmbedStatus = 'loading' | 'ready' | 'error'
 
 export interface DataSquaresEmbedProps {
   /** Your DataSquares app URL, e.g. `https://app.datasquares.ai`. */
@@ -93,8 +114,10 @@ export interface DataSquaresEmbedProps {
   toolbar?: boolean
   /** Brand primary color, hex without the hash or any CSS color. */
   primaryColor?: string
-  /** White-label logo URL (https). */
+  /** Your logo's URL (https), shown in the embed's toolbar. The "Powered by DataSquares" credit always shows. */
   logoUrl?: string
+  /** The dashboard page to open on (its id). Changing it reloads the frame; to switch live, call `setPage`. */
+  page?: string
   /** Initial dashboard parameter values, rendered into the URL as p_* pairs. */
   params?: Record<string, string | number | boolean>
   /**
@@ -106,6 +129,18 @@ export interface DataSquaresEmbedProps {
   height?: number | string
   /** The iframe's `loading`: `lazy` waits until it nears the viewport (default `eager`). */
   loading?: 'eager' | 'lazy'
+  /**
+   * How long after the frame loads the embed may stay silent before `onError` hears `timeout`
+   * (default 15000 ms; 0 turns it off).
+   */
+  loadTimeoutMs?: number
+  /** Shown over the frame while the embed loads (until it is ready or fails). */
+  loadingFallback?: ReactNode
+  /**
+   * Shown over the frame when the embed fails — except `password-required`, which the embed asks for itself. A
+   * function receives the error and `retry` (which reloads the embed).
+   */
+  errorFallback?: ReactNode | ((error: EmbedError, retry: () => void) => ReactNode)
   className?: string
   style?: CSSProperties
   /** Accessible name for the iframe (default "DataSquares dashboard"). */
@@ -114,10 +149,12 @@ export interface DataSquaresEmbedProps {
   onReady?: (info: { contentType: EmbedContentType; pages: Array<{ id: string; name: string }> }) => void
   /**
    * The embed could not render (bad token, blocked origin, network, password,
-   * an ended session), or your `getToken` failed — then `kind` is `invalid`
-   * and `cause` is what it threw.
+   * an ended session), never spoke (`timeout`), or your `getToken` failed —
+   * then `kind` is `invalid` and `cause` is what it threw.
    */
   onError?: (error: EmbedError) => void
+  /** The status changed: `loading`, `ready`, `error`. It starts as `loading`. */
+  onStatusChange?: (status: EmbedStatus) => void
   /** The visible dashboard page changed. */
   onPageChange?: (pageId: string) => void
   /** A chart data point was clicked. */
@@ -133,6 +170,10 @@ export interface DataSquaresEmbedHandle {
   setPage: (pageId: string) => void
   /** Re-fetch the shared content. Waits until the embed listens. */
   refresh: () => void
+  /** Load the embed again from the start (a new page in the frame, a new token with `getToken`). */
+  reload: () => void
+  /** Show the embed full screen. Rejects when the browser refuses (it must follow a click or key press). */
+  requestFullscreen: () => Promise<void>
   /** Current embed state (active page + effective params). Rejects when the embed has not answered within `timeoutMs` (default 5000). */
   getState: (timeoutMs?: number) => Promise<EmbedState>
 }
@@ -144,6 +185,8 @@ interface PendingState {
 
 /** Commands of these kinds replace a waiting one of the same kind: only the last matters to the embed. */
 const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-params', 'ds:set-page', 'ds:refresh'])
+
+const DEFAULT_LOAD_TIMEOUT_MS = 15_000
 
 let requestCounter = 0
 
@@ -158,10 +201,14 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       toolbar,
       primaryColor,
       logoUrl,
+      page,
       params,
       autoResize = true,
       height = 600,
       loading,
+      loadTimeoutMs = DEFAULT_LOAD_TIMEOUT_MS,
+      loadingFallback,
+      errorFallback,
       className,
       style,
       title = 'DataSquares dashboard',
@@ -169,6 +216,11 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
 
     const iframeRef = useRef<HTMLIFrameElement | null>(null)
     const [reportedHeight, setReportedHeight] = useState<number | null>(null)
+    // Bumped by reload(): a new key is a new iframe, and so a new page in it.
+    const [reloadKey, setReloadKey] = useState(0)
+    const [status, setStatusState] = useState<EmbedStatus>('loading')
+    const [lastError, setLastError] = useState<EmbedError | null>(null)
+    const warned = useRef(new Set<string>()).current
 
     // The one origin this component will talk to or listen for (throws, with words, on a bad baseUrl).
     const embedOrigin = useMemo(() => originOf(baseUrl), [baseUrl])
@@ -177,15 +229,24 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
     if (!sessionMode && (!token || !contentId)) {
       throw new Error("DataSquaresEmbed: pass getToken (each person's signed token, from your server), or token and contentId (a share link).")
     }
+    if (DEV) {
+      if (sessionMode && (token || contentId)) {
+        warnOnce(warned, 'both', 'getToken is set, so token and contentId are ignored: the signed token names the content.')
+      }
+      if (isInsecureRemote(baseUrl)) {
+        warnOnce(warned, 'http', `baseUrl ${embedOrigin} is plain http: tokens would cross the network unencrypted. Use https outside local development.`)
+      }
+    }
+
     // A string key, so an inline `params={{ … }}` object does not rebuild the URL each render.
     const paramsKey = params ? JSON.stringify(params) : ''
     const src = useMemo(
       () =>
         sessionMode
-          ? buildSessionEmbedUrl({ baseUrl, theme, toolbar, primaryColor, logoUrl, params })
-          : buildEmbedUrl({ baseUrl, contentId: contentId!, token: token!, theme, toolbar, primaryColor, logoUrl, params }),
+          ? buildSessionEmbedUrl({ baseUrl, theme, toolbar, primaryColor, logoUrl, page, params })
+          : buildEmbedUrl({ baseUrl, contentId: contentId!, token: token!, theme, toolbar, primaryColor, logoUrl, page, params }),
       // `params` is keyed by its contents (paramsKey), not its identity.
-      [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, paramsKey],
+      [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, page, paramsKey],
     )
 
     // The current getToken, so the message listener below binds once per origin.
@@ -194,14 +255,41 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
 
     // Callbacks live in a ref so the message listener binds once per origin,
     // not once per render of a possibly-inline handler.
-    const callbacksRef = useRef<Pick<DataSquaresEmbedProps, 'onReady' | 'onError' | 'onPageChange' | 'onPointClick' | 'onFilterChange'>>({})
+    const callbacksRef = useRef<
+      Pick<DataSquaresEmbedProps, 'onReady' | 'onError' | 'onStatusChange' | 'onPageChange' | 'onPointClick' | 'onFilterChange'>
+    >({})
     callbacksRef.current = {
       onReady: props.onReady,
       onError: props.onError,
+      onStatusChange: props.onStatusChange,
       onPageChange: props.onPageChange,
       onPointClick: props.onPointClick,
       onFilterChange: props.onFilterChange,
     }
+
+    const statusRef = useRef<EmbedStatus>('loading')
+    const setStatus = useCallback((next: EmbedStatus, error: EmbedError | null = null) => {
+      setLastError(error)
+      if (statusRef.current === next) return
+      statusRef.current = next
+      setStatusState(next)
+      callbacksRef.current.onStatusChange?.(next)
+    }, [])
+
+    /**
+     * An error, heard by the host — or, in development and with no onError, by the console. `whileReady: false` leaves a
+     * rendered embed `ready`: a renewal's getToken failing does not end a session that is still showing (the embed says
+     * `expired` itself if it ends).
+     */
+    const reportError = useCallback(
+      (error: EmbedError, whileReady = true) => {
+        if (whileReady || statusRef.current !== 'ready') setStatus('error', error)
+        const onError = callbacksRef.current.onError
+        if (onError) onError(error)
+        else if (DEV) console.warn(`[DataSquaresEmbed] the embed failed: ${error.kind}`, error.cause ?? '')
+      },
+      [setStatus],
+    )
 
     // Pending ds:get-state requests by requestId.
     const pendingStateRef = useRef(new Map<string, PendingState>())
@@ -209,6 +297,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
     // Whether the page in the frame has spoken (so its bridge listens), and the commands waiting for it to.
     const liveRef = useRef(false)
     const queueRef = useRef<EmbedInMessage[]>([])
+    const loadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
     const send = useCallback(
       (msg: EmbedInMessage) => {
@@ -226,10 +315,29 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       for (const msg of waiting) send(msg)
     }, [send])
 
-    // A new src is a new page in the frame: it must speak again before commands go out.
+    // A new src (or a reload) is a new page in the frame: it must speak again before commands go out.
     useEffect(() => {
       liveRef.current = false
-    }, [src, embedOrigin])
+      setStatus('loading')
+      return () => clearTimeout(loadTimerRef.current)
+    }, [src, embedOrigin, reloadKey, setStatus])
+
+    // The frame finished loading: its page now has loadTimeoutMs to speak.
+    const onFrameLoad = useCallback(() => {
+      clearTimeout(loadTimerRef.current)
+      if (liveRef.current || loadTimeoutMs <= 0) return
+      loadTimerRef.current = setTimeout(() => {
+        if (liveRef.current) return
+        reportError({
+          kind: 'timeout',
+          cause: new Error(
+            `The DataSquares embed at ${embedOrigin} loaded but did not respond within ${loadTimeoutMs} ms. Check that baseUrl is right, ` +
+              "that this page's Content-Security-Policy allows it in frame-src, that this site is on the embed's allowed domains, " +
+              'and that no referrerpolicy="no-referrer" hides this page from it.',
+          ),
+        })
+      }, loadTimeoutMs)
+    }, [embedOrigin, loadTimeoutMs, reportError])
 
     useEffect(() => {
       let disposed = false
@@ -242,6 +350,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
 
         if (!liveRef.current) {
           liveRef.current = true
+          clearTimeout(loadTimerRef.current)
           flush()
         }
 
@@ -249,13 +358,14 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         const cb = callbacksRef.current
         switch (msg.type) {
           case 'ds:ready':
+            setStatus('ready')
             cb.onReady?.({ contentType: msg.contentType, pages: msg.pages.map((p) => ({ id: p.id, name: p.name })) })
             break
           case 'ds:resize':
             setReportedHeight(msg.height)
             break
           case 'ds:error':
-            cb.onError?.({ kind: msg.kind })
+            reportError({ kind: msg.kind })
             break
           case 'ds:page-change':
             cb.onPageChange?.(msg.pageId)
@@ -271,7 +381,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
             if (!ask) break
             const target = iframeRef.current.contentWindow
             const fail = (cause: unknown) => {
-              if (!disposed) callbacksRef.current.onError?.({ kind: 'invalid', cause })
+              if (!disposed) reportError({ kind: 'invalid', cause }, false)
             }
             let asked: Promise<string>
             try {
@@ -310,7 +420,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         disposed = true
         window.removeEventListener('message', listener)
       }
-    }, [embedOrigin, flush])
+    }, [embedOrigin, flush, reportError, setStatus])
 
     const post = useCallback(
       (msg: EmbedInMessage) => {
@@ -324,12 +434,26 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       [send],
     )
 
+    const reload = useCallback(() => {
+      liveRef.current = false
+      clearTimeout(loadTimerRef.current)
+      setReportedHeight(null)
+      setReloadKey((k) => k + 1)
+    }, [])
+
     useImperativeHandle(
       ref,
       (): DataSquaresEmbedHandle => ({
         setParams: (p) => post({ type: 'ds:set-params', version: EMBED_PROTOCOL_VERSION, params: p }),
         setPage: (pageId) => post({ type: 'ds:set-page', version: EMBED_PROTOCOL_VERSION, pageId }),
         refresh: () => post({ type: 'ds:refresh', version: EMBED_PROTOCOL_VERSION }),
+        reload,
+        requestFullscreen: async () => {
+          const frame = iframeRef.current
+          if (!frame) throw new Error('DataSquares embed is not mounted.')
+          if (typeof frame.requestFullscreen !== 'function') throw new Error('This browser cannot show an element full screen.')
+          await frame.requestFullscreen()
+        },
         getState: (timeoutMs = 5000) => {
           const requestId = `dsq-${Date.now()}-${++requestCounter}`
           return new Promise<EmbedState>((resolve, reject) => {
@@ -344,16 +468,18 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
           })
         },
       }),
-      [post],
+      [post, reload],
     )
 
-    return (
+    const frame = (
       <iframe
+        key={reloadKey}
         ref={iframeRef}
         src={src}
         title={title}
         className={className}
         loading={loading}
+        onLoad={onFrameLoad}
         style={{
           width: '100%',
           border: 0,
@@ -363,6 +489,25 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         allow="fullscreen"
         referrerPolicy="strict-origin-when-cross-origin"
       />
+    )
+
+    // No fallbacks: the bare iframe, as before (className and style stay on it).
+    if (loadingFallback === undefined && errorFallback === undefined) return frame
+
+    let overlay: ReactNode = null
+    if (status === 'loading') overlay = loadingFallback ?? null
+    else if (status === 'error' && lastError && lastError.kind !== 'password-required') {
+      overlay = typeof errorFallback === 'function' ? errorFallback(lastError, reload) : (errorFallback ?? null)
+    }
+    return (
+      <div style={{ position: 'relative', width: '100%' }} aria-busy={status === 'loading'} data-ds-embed-status={status}>
+        {frame}
+        {overlay !== null && overlay !== undefined && (
+          <div style={{ position: 'absolute', inset: 0 }} data-ds-embed-overlay={status}>
+            {overlay}
+          </div>
+        )}
+      </div>
     )
   },
 )

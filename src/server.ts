@@ -153,3 +153,108 @@ export async function signEmbedToken(input: SignEmbedTokenInput): Promise<string
   const signature = new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signingInput)))
   return `${signingInput}.${base64url(signature)}`
 }
+
+// ── A token route in three lines ───────────────────────────────────────────────────────────────────────────────────
+
+/** What your route decides for the signed-in person: everything `signEmbedToken` takes except the app's key. */
+export type EmbedTokenClaimsInput = Omit<SignEmbedTokenInput, 'clientId' | 'keyId' | 'secret' | 'ttlSeconds' | 'now'>
+
+export interface EmbedTokenRouteOptions<Req> {
+  clientId: string
+  keyId: string
+  /** Server only, e.g. `process.env.DS_EMBED_SECRET`. Read on each request, so a build without it does not fail. */
+  secret: string
+  /** Seconds until each token expires: 300 by default, 600 at most. */
+  ttlSeconds?: number
+  /**
+   * Who is signed in to YOUR product, from your own session, and what they may see. Return null (or undefined) when no
+   * one is: the route answers 401 and signs nothing.
+   */
+  claims: (request: Req) => EmbedTokenClaimsInput | null | undefined | Promise<EmbedTokenClaimsInput | null | undefined>
+  /** Hears a failure (your `claims` threw, or the input could not be signed). Default: `console.error`. */
+  onError?: (error: unknown) => void
+}
+
+interface RouteAnswer {
+  status: number
+  body: string
+}
+
+async function answerTokenRequest<Req>(opts: EmbedTokenRouteOptions<Req>, request: Req): Promise<RouteAnswer> {
+  const fail = (error: unknown): RouteAnswer => {
+    if (opts.onError) opts.onError(error)
+    else console.error('[datasquares-embed] could not sign the embed token:', error)
+    // Never the reason: it may name your configuration. The onError hook has it.
+    return { status: 500, body: 'Could not sign the embed token.' }
+  }
+  let claims: EmbedTokenClaimsInput | null | undefined
+  try {
+    claims = await opts.claims(request)
+  } catch (error) {
+    return fail(error)
+  }
+  if (!claims) return { status: 401, body: 'Not signed in.' }
+  try {
+    // The app's key last: a claims object cannot replace it.
+    const token = await signEmbedToken({
+      ...claims,
+      clientId: opts.clientId,
+      keyId: opts.keyId,
+      secret: opts.secret,
+      ...(opts.ttlSeconds !== undefined ? { ttlSeconds: opts.ttlSeconds } : {}),
+    })
+    return { status: 200, body: token }
+  } catch (error) {
+    return fail(error)
+  }
+}
+
+const TOKEN_HEADERS: Record<string, string> = {
+  'Content-Type': 'text/plain; charset=utf-8',
+  // Each token is the person's own and makes one session: no cache, shared or private, may keep one.
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+}
+
+/**
+ * A token route for any runtime that speaks Fetch `Request`/`Response`: Next.js route handlers, Remix, Hono, Bun,
+ * Deno, Cloudflare Workers.
+ *
+ *   // app/analytics-token/route.ts
+ *   export const GET = createEmbedTokenHandler({
+ *     clientId: process.env.DS_EMBED_CLIENT_ID!, keyId: process.env.DS_EMBED_KEY_ID!, secret: process.env.DS_EMBED_SECRET!,
+ *     claims: async () => { const user = await currentUser(); return user && { sub: user.id, content: { type: 'dashboard', id: '…' } } },
+ *   })
+ */
+export function createEmbedTokenHandler(opts: EmbedTokenRouteOptions<Request>): (request: Request) => Promise<Response> {
+  return async (request) => {
+    const { status, body } = await answerTokenRequest(opts, request)
+    return new Response(body, { status, headers: TOKEN_HEADERS })
+  }
+}
+
+/** The part of a Node `ServerResponse` (and so Express's `res`) the middleware writes to. */
+export interface NodeResponseLike {
+  statusCode: number
+  setHeader(name: string, value: string): unknown
+  end(body?: string): unknown
+}
+
+/**
+ * The same route for Node's `http` and Express-style servers:
+ *
+ *   app.get('/analytics-token', requireSignedIn, createEmbedTokenMiddleware({
+ *     clientId, keyId, secret,
+ *     claims: (req) => ({ sub: req.user.id, tenant: req.user.accountId, content: { type: 'dashboard', id: '…' } }),
+ *   }))
+ */
+export function createEmbedTokenMiddleware<Req = unknown>(
+  opts: EmbedTokenRouteOptions<Req>,
+): (request: Req, response: NodeResponseLike) => Promise<void> {
+  return async (request, response) => {
+    const { status, body } = await answerTokenRequest(opts, request)
+    response.statusCode = status
+    for (const [name, value] of Object.entries(TOKEN_HEADERS)) response.setHeader(name, value)
+    response.end(body)
+  }
+}

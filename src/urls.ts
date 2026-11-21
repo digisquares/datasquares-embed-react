@@ -10,6 +10,8 @@ export interface EmbedUrlOptions {
   toolbar?: boolean
   primaryColor?: string
   logoUrl?: string
+  /** The dashboard page to open on (its id). The embed falls back to the first page when it has no such page. */
+  page?: string
   params?: Record<string, string | number | boolean>
 }
 
@@ -36,6 +38,7 @@ function embedUrl(path: string, opts: EmbedUrlOptions): URL {
   if (opts.toolbar !== undefined) url.searchParams.set('toolbar', String(opts.toolbar))
   if (opts.primaryColor) url.searchParams.set('primaryColor', opts.primaryColor)
   if (opts.logoUrl) url.searchParams.set('logoUrl', opts.logoUrl)
+  if (opts.page) url.searchParams.set('page', opts.page)
   for (const [key, value] of Object.entries(opts.params ?? {})) {
     url.searchParams.set(`p_${key}`, String(value))
   }

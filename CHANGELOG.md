@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- `page` prop: the dashboard page to open on (`?page=` on both embed URLs).
+- `loadTimeoutMs` (default 15 s, counted from the frame's load): an embed that
+  never speaks — wrong `baseUrl`, a host Content-Security-Policy that blocks the
+  frame, a site not on the allowed domains, a `no-referrer` policy — is now an
+  `onError` with kind `timeout` and a `cause` naming those reasons, where the
+  host used to hear nothing. README: Troubleshooting.
+- `onStatusChange` and a status (`loading` · `ready` · `error`).
+- `loadingFallback` and `errorFallback` (a node, or `(error, retry) => node`),
+  laid over the frame; never over the embed's own password prompt. With
+  neither, the bare iframe renders as before.
+- `reload()` (a new frame, a new token) and `requestFullscreen()` on the handle.
+- `useDataSquaresEmbed()`: `status`, `error`, `contentType`, `pages`,
+  `pageId`, `filters` and the commands, with `bind` to spread on the component.
+- `createEmbedTokenHandler` (Fetch: Next.js route handlers, Remix, Hono, Bun,
+  Deno, Workers) and `createEmbedTokenMiddleware` (Node, Express) on `/server`:
+  a token route from a `claims(request)` function — 200 with `no-store`, 401
+  when no one is signed in, 500 without the reason when signing fails.
+- `@digisquares/datasquares-embed-react/testing`: `simulateEmbed()`, a
+  stand-in embed for the host's own tests.
+- Development warnings: `getToken` with `token`/`contentId`, `baseUrl` over
+  plain http to another machine, a failure with no `onError`.
+
+### Changed
+
+- `onError`'s `kind` is `EmbedHostErrorKind` (the embed's kinds and `timeout`).
+- A `getToken` failure during a renewal is heard by `onError` but leaves a
+  showing embed `ready`.
+- `logoUrl` is no longer called white-label: the Powered by DataSquares credit
+  always shows.
+
 ## 0.3.0
 
 ### Fixed

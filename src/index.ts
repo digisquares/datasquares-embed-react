@@ -1,5 +1,7 @@
 export { DataSquaresEmbed } from './DataSquaresEmbed.js'
-export type { DataSquaresEmbedProps, DataSquaresEmbedHandle, EmbedError } from './DataSquaresEmbed.js'
+export type { DataSquaresEmbedProps, DataSquaresEmbedHandle, EmbedError, EmbedHostErrorKind, EmbedStatus } from './DataSquaresEmbed.js'
+export { useDataSquaresEmbed } from './use-embed.js'
+export type { UseDataSquaresEmbed, DataSquaresEmbedBinding } from './use-embed.js'
 // The URL builders live outside the client component, so a server component or route can call them.
 export { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin } from './urls.js'
 export type { EmbedUrlOptions } from './urls.js'
@@ -29,5 +31,6 @@ export type {
   SetParamsCommand,
   TokenCommand,
 } from './protocol.js'
+// The test stand-in for the embed is its own entry too, `@digisquares/datasquares-embed-react/testing`.
 // The server-side signer is its own entry, `@digisquares/datasquares-embed-react/server`, so a browser bundle never
 // carries a function that takes your embed app's secret.
