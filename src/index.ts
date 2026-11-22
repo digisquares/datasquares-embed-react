@@ -1,10 +1,10 @@
 export { DataSquaresEmbed } from './DataSquaresEmbed.js'
-export type { DataSquaresEmbedProps, DataSquaresEmbedHandle, EmbedError, EmbedHostErrorKind, EmbedStatus } from './DataSquaresEmbed.js'
+export type { DataSquaresEmbedProps, DataSquaresEmbedHandle, EmbedError, EmbedHostErrorKind, EmbedReadyInfo, EmbedStatus } from './DataSquaresEmbed.js'
 export { useDataSquaresEmbed } from './use-embed.js'
 export type { UseDataSquaresEmbed, DataSquaresEmbedBinding } from './use-embed.js'
 // The URL builders live outside the client component, so a server component or route can call them.
 export { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin } from './urls.js'
-export type { EmbedUrlOptions } from './urls.js'
+export type { EmbedFont, EmbedMenuLayout, EmbedUrlOptions } from './urls.js'
 export {
   EMBED_PROTOCOL_VERSION,
   MAX_EMBED_TOKEN_CHARS,
@@ -17,6 +17,8 @@ export type {
   EmbedFilter,
   EmbedFilterChangeMessage,
   EmbedInMessage,
+  EmbedItemChangeMessage,
+  EmbedMenuItem,
   EmbedOutMessage,
   EmbedPageChangeMessage,
   EmbedPointClickMessage,
@@ -26,6 +28,7 @@ export type {
   EmbedStateMessage,
   EmbedTokenRequestMessage,
   GetStateCommand,
+  OpenCommand,
   RefreshCommand,
   SetPageCommand,
   SetParamsCommand,

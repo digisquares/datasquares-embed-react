@@ -35,8 +35,12 @@ export interface SignEmbedTokenInput {
    * (every rule needs its attribute; an attribute without a rule is refused).
    */
   attributes?: Record<string, string | number | boolean | Array<string | number>>
-  /** The dashboard, report or presentation the session opens (one of the app's content; a presentation in present mode). */
-  content: { type: 'dashboard' | 'report' | 'presentation'; id: string }
+  /**
+   * What the session opens: one dashboard, report or presentation of the app's content (a presentation in present mode),
+   * or the app's menu — `{ type: 'menu' }` for all of it, `{ type: 'menu', items: [...] }` for some of its items (content
+   * ids, 1 to 100) for this person. Items not on the app's menu are left out by DataSquares.
+   */
+  content: { type: 'dashboard' | 'report' | 'presentation'; id: string } | { type: 'menu'; items?: string[] }
   /** Seconds until it expires: 300 by default, 600 at most. */
   ttlSeconds?: number
   /** The clock, in milliseconds (tests). */
@@ -52,6 +56,8 @@ const ATTRIBUTE_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/
 const RESERVED_ATTRIBUTE_NAMES: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
 const CONTENT_TYPES: ReadonlySet<unknown> = new Set(['dashboard', 'report', 'presentation'])
 const MAX_ID_CHARS = 255
+/** The items a menu token may narrow its menu to, at most (100 content ids fit in the 8,192 characters a token may be). */
+export const MAX_MENU_ITEMS = 100
 
 /** An input `signEmbedToken` cannot sign: `field` names which, and the message says why. */
 export class EmbedTokenInputError extends TypeError {
@@ -84,11 +90,26 @@ function checkInput(input: SignEmbedTokenInput): void {
     throw new EmbedTokenInputError('role', "must be 'viewer' or 'viewer_ai'.")
   }
   const content = input.content as unknown
-  if (!isRecord(content) || !CONTENT_TYPES.has(content.type)) {
-    throw new EmbedTokenInputError('content', "must be { type: 'dashboard' | 'report' | 'presentation', id }.")
-  }
-  if (typeof content.id !== 'string' || !UUID_RE.test(content.id)) {
-    throw new EmbedTokenInputError('content.id', 'must be the content\'s id, a UUID.')
+  if (isRecord(content) && content.type === 'menu') {
+    if (content.items !== undefined) {
+      const items = content.items
+      if (!Array.isArray(items) || items.length === 0 || items.length > MAX_MENU_ITEMS) {
+        throw new EmbedTokenInputError('content.items', `must be 1 to ${MAX_MENU_ITEMS} content ids (omit it for the whole menu).`)
+      }
+      const seen = new Set<string>()
+      for (const [i, id] of items.entries()) {
+        if (typeof id !== 'string' || !UUID_RE.test(id)) throw new EmbedTokenInputError(`content.items[${i}]`, "must be a content's id, a UUID.")
+        if (seen.has(id.toLowerCase())) throw new EmbedTokenInputError(`content.items[${i}]`, 'names an item already in the list.')
+        seen.add(id.toLowerCase())
+      }
+    }
+  } else {
+    if (!isRecord(content) || !CONTENT_TYPES.has(content.type)) {
+      throw new EmbedTokenInputError('content', "must be { type: 'dashboard' | 'report' | 'presentation', id } or { type: 'menu', items? }.")
+    }
+    if (typeof content.id !== 'string' || !UUID_RE.test(content.id)) {
+      throw new EmbedTokenInputError('content.id', 'must be the content\'s id, a UUID.')
+    }
   }
   if (input.attributes !== undefined) {
     if (!isRecord(input.attributes)) throw new EmbedTokenInputError('attributes', 'must be an object of names and values.')

@@ -11,6 +11,17 @@
 
 ### Added
 
+- Menus: a token whose content is `{ type: 'menu' }` (or `{ type: 'menu',
+  items }`, 1 to 100 content ids, for some of them) opens the embed app's menu.
+  The embed draws it in the app's layout or the `menu` prop's (`sidebar`,
+  `tabs`, `dropdown`, `gallery`), or the host draws its own (`menu="none"`)
+  from `onReady`'s `items` / the hook's `items` and `item`. `item` opens one
+  first; `open(id)` switches in the same frame and session; `onItemChange`
+  hears every switch. `signEmbedToken` checks a menu's items. `/testing`:
+  `ready({ items, item })` and `itemChange()`. README: A menu.
+- The look: `theme="auto"` (the viewer's system), `tabs`, `background`
+  (including `transparent`), `font`, `padding`; each wins over the embed app's
+  look (Administration → Settings → Embedding).
 - `page` prop: the dashboard page to open on (`?page=` on both embed URLs).
 - `loadTimeoutMs` (default 15 s, counted from the frame's load): an embed that
   never speaks — wrong `baseUrl`, a host Content-Security-Policy that blocks the
@@ -36,6 +47,8 @@
 ### Changed
 
 - `onError`'s `kind` is `EmbedHostErrorKind` (the embed's kinds and `timeout`).
+- `onReady` hears `item` and `items` besides `contentType` and `pages`, and
+  `contentType` may be `menu` (the embed's gallery, no item open yet).
 - A `getToken` failure during a renewal is heard by `onError` but leaves a
   showing embed `ready`.
 - `logoUrl` is no longer called white-label: the Powered by DataSquares credit

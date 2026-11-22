@@ -1,9 +1,10 @@
 # @digisquares/datasquares-react
 
-React SDK for embedding DataSquares dashboards, reports and presentations: the
-`<DataSquaresEmbed>` component and the `useDataSquaresEmbed()` hook, typed
-events, host-side controls, loading and error display, a token route for your
-server in three lines, and a stand-in embed for your tests.
+React SDK for embedding DataSquares dashboards, reports and presentations — one
+of them, or a menu of them in the embed app's look: the `<DataSquaresEmbed>`
+component and the `useDataSquaresEmbed()` hook, typed events, host-side
+controls, loading and error display, a token route for your server in three
+lines, and a stand-in embed for your tests.
 
 ## Install
 
@@ -66,6 +67,12 @@ Both answer `200` with the token (`Cache-Control: no-store`), `401` when
 `claims` returns nothing (no one signed in), and `500` — without the reason —
 when signing fails; `onError` (default `console.error`) hears why. To sign by
 hand, `signEmbedToken({ clientId, keyId, secret, ...claims })` returns the token.
+
+`content` names one dashboard, report or presentation of the app's content, or
+the app's **menu**: `{ type: 'menu' }` for all of it, or `{ type: 'menu',
+items: [...] }` for some of its items (1 to 100 content ids) for this person —
+your premium customers see more, say. Items not on the app's menu are left out
+by DataSquares, so taking one off the app never breaks your route.
 
 ```tsx
 import { useRef } from 'react'
@@ -154,6 +161,35 @@ module and can be called from server code. Sign tokens in a route handler with
 `createEmbedTokenHandler` from `@digisquares/datasquares-react/server`
 (above).
 
+## A menu
+
+A token whose content is `{ type: 'menu' }` opens the embed app's menu: its
+dashboards, reports and presentations in the order you set under
+**Administration → Settings → Embedding**, each under its section heading and
+with its label. The embed draws the menu in the app's layout — a `sidebar`,
+`tabs`, a `dropdown`, or a `gallery` of cards shown first — or the `menu` prop's.
+Another item opens in the same frame and session, without a new token.
+
+To draw the menu in your own design, pass `menu="none"` and render it from the
+hook's `items`:
+
+```tsx
+function Analytics() {
+  const embed = useDataSquaresEmbed()
+  return (
+    <div className="flex">
+      <MySidebar items={embed.items} current={embed.item?.id} onSelect={embed.open} />
+      <DataSquaresEmbed {...embed.bind} baseUrl="https://app.datasquares.ai" getToken={getToken} menu="none" />
+    </div>
+  )
+}
+```
+
+Each item is `{ id, type, name, section }`. `item` opens one first; `open(id)`
+switches live (an id not in the person's menu is ignored, and in development
+the console says so); `onItemChange` hears every switch, from your menu or the
+embed's.
+
 ## Props
 
 | Prop | Default | |
@@ -161,10 +197,16 @@ module and can be called from server code. Sign tokens in a route handler with
 | `baseUrl` | — | Your DataSquares app URL (http or https). The one origin the component talks to. |
 | `getToken` | — | Each person's signed token, from your server (two keys). Takes the place of `contentId` and `token`. |
 | `contentId`, `token` | — | A share link's content id and token. |
-| `theme` | the embed's | `light` or `dark`. |
-| `toolbar` | `true` | Show the embed toolbar. |
-| `primaryColor` | — | Your brand color (hex without `#`, or any CSS color). |
-| `logoUrl` | — | Your logo (https), shown in the embed's toolbar. The small *Powered by DataSquares* credit always shows: DataSquares does not offer white-labelling. |
+| `item` | the menu's first | A menu token: the item to open first, by content id. Changing it reloads the frame; to switch live, call `open`. |
+| `menu` | the app's layout | A menu token: `sidebar`, `tabs`, `dropdown`, `gallery`, or `none` when your page draws the menu. |
+| `theme` | the app's look, else `light` | `light`, `dark`, or `auto` (follows the viewer's system). |
+| `toolbar` | the app's look, else `true` | Show the embed toolbar. |
+| `tabs` | the app's look, else `true` | Show a dashboard's page tabs (hidden, your page can still `setPage`). |
+| `primaryColor` | the app's look | Your brand color (hex without `#`, or any CSS color). |
+| `logoUrl` | the app's look | Your logo (https), shown beside the small *Powered by DataSquares* credit, which always shows: DataSquares does not offer white-labelling. |
+| `background` | the theme's | `transparent` (your page shows through the frame) or a colour as hex. |
+| `font` | the app's look | `system` (the viewer's own) or a font the embed bundles: `inter`, `geist`, `space-grotesk`, `source-serif`, `jetbrains-mono`. |
+| `padding` | the app's look, else `normal` | Space around the content: `none`, `compact` or `normal`. |
 | `page` | first page | The dashboard page to open on, by id. Changing it reloads the frame; to switch live, call `setPage`. |
 | `params` | — | Initial parameter values (`p_*` in the URL). An inline object is fine: the frame reloads only when the values change. |
 | `autoResize` | `true` | Grow the iframe to its content. |
@@ -175,6 +217,10 @@ module and can be called from server code. Sign tokens in a route handler with
 | `errorFallback` | — | Shown over the frame when it fails: a node, or `(error, retry) => node`. Never for `password-required` (the embed asks for the password itself). |
 | `title` | `DataSquares dashboard` | The iframe's accessible name. |
 | `className`, `style` | — | On the iframe. |
+
+The embed app's look (Administration → Settings → Embedding) also sets card
+corners, borders and shadows and up to 8 chart colours; each prop above wins
+over the app's look for that embed.
 
 With neither fallback set, the component renders the bare iframe. With one, it
 wraps the iframe in a `position: relative` div (`data-ds-embed-status` names
@@ -198,6 +244,7 @@ protocol:
 embed.current?.setParams({ region: 'east' })   // wins over the URL's p_* defaults
 embed.current?.setPage('page-id')
 embed.current?.refresh()                       // re-fetch the content
+embed.current?.open('item-id')                 // a menu token: another item of the menu
 embed.current?.reload()                        // load the embed again from the start (e.g. after a timeout)
 await embed.current?.requestFullscreen()       // from a click: browsers allow full screen only after one
 const { pageId, params } = await embed.current!.getState()   // rejects after 5 s (getState(ms) to change)
@@ -205,8 +252,8 @@ const { pageId, params } = await embed.current!.getState()   // rejects after 5 
 
 Commands can be sent as soon as the ref is set, e.g. from an effect on mount:
 until the page in the frame is listening, they wait, and go out when it first
-speaks. Only the last `setParams`, `setPage` and `refresh` wait — each replaces
-the one before. When `src` changes (another dashboard, page, theme or params)
+speaks. Only the last `setParams`, `setPage`, `refresh` and `open` wait — each
+replaces the one before. When `src` changes (another dashboard, page, theme or params)
 or after `reload()`, the new page is waited for the same way.
 
 ## The embed as state: `useDataSquaresEmbed()`
@@ -232,8 +279,9 @@ function Analytics() {
 ```
 
 It gives `status` (`loading` · `ready` · `error`), `error`, `contentType`,
-`pages`, `pageId`, `filters`, and the commands (`setParams`, `setPage`,
-`refresh`, `reload`, `requestFullscreen`, `getState`). Pass your own `onReady`,
+`items` and `item` (a menu token's), `pages`, `pageId`, `filters`, and the
+commands (`setParams`, `setPage`, `refresh`, `open`, `reload`,
+`requestFullscreen`, `getState`). Pass your own `onReady`, `onItemChange`,
 `onError`, `onPageChange`, `onFilterChange`, `onStatusChange` or `onPointClick`
 to the hook, not to the component after `{...embed.bind}`, where they would
 replace the hook's.
@@ -242,7 +290,8 @@ replace the hook's.
 
 | Prop | Fires when |
 |---|---|
-| `onReady` | the embed authorized and rendered: `contentType` (`dashboard`, `report` or `presentation`) and `pages` (a dashboard's; none for a report or a presentation) |
+| `onReady` | the embed authorized and rendered: `contentType` (`dashboard`, `report`, `presentation`, or `menu` while the embed's gallery shows), `pages` (a dashboard's; none for a report or a presentation), and with a menu token `items` (the person's menu) and `item` (the one shown) |
+| `onItemChange` | a menu token: another item of the menu is shown (picked in the embed's menu, or opened with `open`) |
 | `onError` | it could not render — `invalid`, `forbidden`, `network`, `password-required`, `expired` (a session ended with no new token) — or it never spoke: `timeout`, with a `cause` naming the likely reasons — or your `getToken` failed: then `kind` is `invalid` and `cause` is what it threw (or a `TypeError` for an empty or over-long token) |
 | `onStatusChange` | the status changed: `loading` (it starts so), `ready`, `error` |
 | `onPageChange` | the visible dashboard page changed |
@@ -293,9 +342,9 @@ it('shows the pages and switches on click', async () => {
 })
 ```
 
-It has `ready`, `resize`, `error`, `pageChange`, `pointClick`, `filterChange`,
-`requestToken`, `setState` and `send`, and `commands` and `tokens` to assert
-on. After `reload()` (a new iframe), call `simulateEmbed` again. Never import it
+It has `ready` (`ready({ items, item })` speaks as a menu), `itemChange`,
+`resize`, `error`, `pageChange`, `pointClick`, `filterChange`, `requestToken`,
+`setState` and `send`, and `commands` and `tokens` to assert on. After `reload()` (a new iframe), call `simulateEmbed` again. Never import it
 in application code: it replaces the frame's window.
 
 ## Upgrading from 0.3
@@ -309,16 +358,20 @@ npm uninstall @digisquares/datasquares-embed-react
 npm install @digisquares/datasquares-react
 ```
 
-Nothing else to change. New: `page`, `loadTimeoutMs`, `loadingFallback`,
-`errorFallback`, `onStatusChange`, `reload()`, `requestFullscreen()`,
-`useDataSquaresEmbed()`, `createEmbedTokenHandler`,
-`createEmbedTokenMiddleware` and the `/testing` entry. What behaves
-differently:
+Nothing else to change. New: menus (`content: { type: 'menu' }` in the token,
+`item`, `menu`, `open()`, `onItemChange`, the hook's `items` and `item`), the
+look props (`theme="auto"`, `tabs`, `background`, `font`, `padding`), `page`,
+`loadTimeoutMs`, `loadingFallback`, `errorFallback`, `onStatusChange`,
+`reload()`, `requestFullscreen()`, `useDataSquaresEmbed()`,
+`createEmbedTokenHandler`, `createEmbedTokenMiddleware` and the `/testing`
+entry. What behaves differently:
 
 - `onError` can hear `timeout` (an embed that never spoke within 15 s of
   loading). Its type is now `EmbedHostErrorKind`, the embed's kinds and
   `timeout`; a `switch` over `kind` that must be exhaustive needs that case.
 - With no `onError`, a failure is written to the console in development.
+- `onReady` also hears `item` and `items` (null and empty for a token naming
+  one item); a test asserting its exact argument needs them.
 
 ## Upgrading from 0.2
 

@@ -20,6 +20,7 @@ import {
   type EmbedErrorKind,
   type EmbedFilter,
   type EmbedInMessage,
+  type EmbedMenuItem,
   type EmbedOutMessage,
   type EmbedState,
 } from './protocol.js'
@@ -39,8 +40,18 @@ export interface EmbedSimulator {
   readonly commands: EmbedInMessage[]
   /** The tokens the component answered token requests with, oldest first. */
   readonly tokens: string[]
-  /** The embed rendered (default: a dashboard with no pages). */
-  ready(info?: { contentType?: EmbedContentType; pages?: Array<{ id: string; name: string }> }): void
+  /**
+   * The embed rendered (default: a dashboard with no pages). A menu token's embed: pass `items` (the person's menu) and
+   * `item` (the one shown; null with `contentType: 'menu'` for a gallery with none open).
+   */
+  ready(info?: {
+    contentType?: EmbedContentType | 'menu'
+    pages?: Array<{ id: string; name: string }>
+    item?: EmbedMenuItem | null
+    items?: EmbedMenuItem[]
+  }): void
+  /** A menu token's embed shows another item (its own menu, or your page's `open`). */
+  itemChange(item: EmbedMenuItem): void
   /** The embed's content is this tall. */
   resize(height: number): void
   /** The embed could not render. */
@@ -125,7 +136,15 @@ export function simulateEmbed(target: HTMLIFrameElement | ParentNode, options: S
     commands,
     tokens,
     ready: (info = {}) =>
-      send({ type: 'ds:ready', version: EMBED_PROTOCOL_VERSION, contentType: info.contentType ?? 'dashboard', pages: info.pages ?? [] }),
+      send({
+        type: 'ds:ready',
+        version: EMBED_PROTOCOL_VERSION,
+        contentType: info.contentType ?? 'dashboard',
+        pages: info.pages ?? [],
+        item: info.item ?? null,
+        items: info.items ?? [],
+      }),
+    itemChange: (item) => send({ type: 'ds:item-change', version: EMBED_PROTOCOL_VERSION, item }),
     resize: (height) => send({ type: 'ds:resize', version: EMBED_PROTOCOL_VERSION, height }),
     error: (kind) => send({ type: 'ds:error', version: EMBED_PROTOCOL_VERSION, kind }),
     pageChange: (pageId) => send({ type: 'ds:page-change', version: EMBED_PROTOCOL_VERSION, pageId }),

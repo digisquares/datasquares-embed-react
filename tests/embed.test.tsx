@@ -101,7 +101,7 @@ describe('<DataSquaresEmbed> message validation', () => {
     expect(onReady).not.toHaveBeenCalled()
 
     dispatch(ready, BASE, iframe.contentWindow)
-    expect(onReady).toHaveBeenCalledWith({ contentType: 'dashboard', pages: [] })
+    expect(onReady).toHaveBeenCalledWith({ contentType: 'dashboard', pages: [], item: null, items: [] })
   })
 
   it('two embeds on one page do not receive each other events', () => {
@@ -270,7 +270,7 @@ describe('an embedded presentation', () => {
   it('is ready as a presentation: the host hears it, with no pages', () => {
     const { iframe, onReady } = renderEmbed({ contentId: 'deck-1' })
     dispatch({ type: 'ds:ready', version: 1, contentType: 'presentation', pages: [] }, BASE, iframe.contentWindow)
-    expect(onReady).toHaveBeenCalledWith({ contentType: 'presentation', pages: [] })
+    expect(onReady).toHaveBeenCalledWith({ contentType: 'presentation', pages: [], item: null, items: [] })
   })
 
   it('is a ready message the guard accepts; any other kind is still refused', () => {

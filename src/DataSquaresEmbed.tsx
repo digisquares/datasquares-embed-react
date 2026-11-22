@@ -34,6 +34,13 @@
  * embed then stays silent by design), or a network that never answers. The
  * host would hear nothing at all; after `loadTimeoutMs` it hears `timeout`.
  *
+ * ── A menu ──────────────────────────────────────────────────────────────
+ * A token whose content is `{ type: 'menu' }` opens the embed app's menu: the
+ * embed draws it (sidebar, tabs, dropdown, gallery — the app's layout, or the
+ * `menu` prop), or, with `menu="none"`, your page draws its own from
+ * `onReady`'s `items` and opens one with `open(id)`. Another item opens in the
+ * same frame and session, without a new token; `onItemChange` hears it.
+ *
  * ── Two keys: a person's signed token ───────────────────────────────────
  * For dashboards embedded in your own product for your own people, pass
  * `getToken`: a function that asks YOUR server for a short-lived token it
@@ -70,9 +77,10 @@ import {
   type EmbedErrorKind,
   type EmbedFilter,
   type EmbedInMessage,
+  type EmbedMenuItem,
   type EmbedState,
 } from './protocol.js'
-import { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin as originOf } from './urls.js'
+import { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin as originOf, type EmbedFont, type EmbedMenuLayout } from './urls.js'
 import { DEV, isInsecureRemote, warnOnce } from './dev.js'
 
 /**
@@ -93,6 +101,18 @@ export interface EmbedError {
 /** `loading` until the embed has rendered (`ready`) or could not (`error`); a new `src` or `reload()` loads again. */
 export type EmbedStatus = 'loading' | 'ready' | 'error'
 
+/** What `onReady` hears. */
+export interface EmbedReadyInfo {
+  /** What shows: a dashboard, a report, a presentation, or `menu` while the embed's gallery shows and no item is open. */
+  contentType: EmbedContentType | 'menu'
+  /** A dashboard's pages (none for a report, a one-page dashboard or a presentation). */
+  pages: Array<{ id: string; name: string }>
+  /** A menu token: the item shown (null while a gallery shows); null for a token naming one item. */
+  item: EmbedMenuItem | null
+  /** A menu token: the person's menu, in order; empty for a token naming one item. */
+  items: EmbedMenuItem[]
+}
+
 export interface DataSquaresEmbedProps {
   /** Your DataSquares app URL, e.g. `https://app.datasquares.ai`. */
   baseUrl: string
@@ -108,8 +128,8 @@ export interface DataSquaresEmbedProps {
   contentId?: string
   /** A share link's token (the dashboard's Share dialog → Embed). Public: anyone holding it sees the view. */
   token?: string
-  /** `light` | `dark`; omit to follow the embed's default. */
-  theme?: 'light' | 'dark'
+  /** `light` | `dark` | `auto` (follows the viewer's system); omit for the embed app's look, else light. */
+  theme?: 'light' | 'dark' | 'auto'
   /** Show the embed toolbar (default true, matching the embed page). */
   toolbar?: boolean
   /** Brand primary color, hex without the hash or any CSS color. */
@@ -118,6 +138,21 @@ export interface DataSquaresEmbedProps {
   logoUrl?: string
   /** The dashboard page to open on (its id). Changing it reloads the frame; to switch live, call `setPage`. */
   page?: string
+  /** Show a dashboard's page tabs (omit for the embed app's look, else shown); hidden, your page can still `setPage`. */
+  tabs?: boolean
+  /** `default`, `transparent` (your page shows through the frame), or a colour as hex. */
+  background?: string
+  /** A font the embed bundles, or `system` (the viewer's own). */
+  font?: EmbedFont
+  /** Space around the content: `none`, `compact` or `normal`. */
+  padding?: 'none' | 'compact' | 'normal'
+  /**
+   * A menu token: the item to open first (its content id); default the menu's first, or the gallery. Changing it reloads
+   * the frame; to switch live, call `open`.
+   */
+  item?: string
+  /** A menu token: how the embed draws the menu (default: the embed app's); `none` when your page draws its own. */
+  menu?: EmbedMenuLayout
   /** Initial dashboard parameter values, rendered into the URL as p_* pairs. */
   params?: Record<string, string | number | boolean>
   /**
@@ -145,8 +180,13 @@ export interface DataSquaresEmbedProps {
   style?: CSSProperties
   /** Accessible name for the iframe (default "DataSquares dashboard"). */
   title?: string
-  /** The embed authorized and rendered: a dashboard (with its pages), a report, or a presentation (in present mode). */
-  onReady?: (info: { contentType: EmbedContentType; pages: Array<{ id: string; name: string }> }) => void
+  /**
+   * The embed authorized and rendered: a dashboard (with its pages), a report, a presentation (in present mode), or a
+   * menu's gallery; with a menu token, the item shown and the person's items.
+   */
+  onReady?: (info: EmbedReadyInfo) => void
+  /** A menu token: another item of the menu is shown (picked in the embed's menu, or opened with `open`). */
+  onItemChange?: (item: EmbedMenuItem) => void
   /**
    * The embed could not render (bad token, blocked origin, network, password,
    * an ended session), never spoke (`timeout`), or your `getToken` failed —
@@ -170,6 +210,8 @@ export interface DataSquaresEmbedHandle {
   setPage: (pageId: string) => void
   /** Re-fetch the shared content. Waits until the embed listens. */
   refresh: () => void
+  /** A menu token: open another item of the person's menu, in the same frame and session. Waits until the embed listens. */
+  open: (itemId: string) => void
   /** Load the embed again from the start (a new page in the frame, a new token with `getToken`). */
   reload: () => void
   /** Show the embed full screen. Rejects when the browser refuses (it must follow a click or key press). */
@@ -184,7 +226,7 @@ interface PendingState {
 }
 
 /** Commands of these kinds replace a waiting one of the same kind: only the last matters to the embed. */
-const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-params', 'ds:set-page', 'ds:refresh'])
+const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-params', 'ds:set-page', 'ds:refresh', 'ds:open'])
 
 const DEFAULT_LOAD_TIMEOUT_MS = 15_000
 
@@ -202,6 +244,12 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       primaryColor,
       logoUrl,
       page,
+      tabs,
+      background,
+      font,
+      padding,
+      item,
+      menu,
       params,
       autoResize = true,
       height = 600,
@@ -241,12 +289,14 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
     // A string key, so an inline `params={{ … }}` object does not rebuild the URL each render.
     const paramsKey = params ? JSON.stringify(params) : ''
     const src = useMemo(
-      () =>
-        sessionMode
-          ? buildSessionEmbedUrl({ baseUrl, theme, toolbar, primaryColor, logoUrl, page, params })
-          : buildEmbedUrl({ baseUrl, contentId: contentId!, token: token!, theme, toolbar, primaryColor, logoUrl, page, params }),
+      () => {
+        const look = { baseUrl, theme, toolbar, primaryColor, logoUrl, page, tabs, background, font, padding, params }
+        return sessionMode
+          ? buildSessionEmbedUrl({ ...look, item, menu })
+          : buildEmbedUrl({ ...look, contentId: contentId!, token: token! })
+      },
       // `params` is keyed by its contents (paramsKey), not its identity.
-      [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, page, paramsKey],
+      [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, page, tabs, background, font, padding, item, menu, paramsKey],
     )
 
     // The current getToken, so the message listener below binds once per origin.
@@ -256,10 +306,11 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
     // Callbacks live in a ref so the message listener binds once per origin,
     // not once per render of a possibly-inline handler.
     const callbacksRef = useRef<
-      Pick<DataSquaresEmbedProps, 'onReady' | 'onError' | 'onStatusChange' | 'onPageChange' | 'onPointClick' | 'onFilterChange'>
+      Pick<DataSquaresEmbedProps, 'onReady' | 'onItemChange' | 'onError' | 'onStatusChange' | 'onPageChange' | 'onPointClick' | 'onFilterChange'>
     >({})
     callbacksRef.current = {
       onReady: props.onReady,
+      onItemChange: props.onItemChange,
       onError: props.onError,
       onStatusChange: props.onStatusChange,
       onPageChange: props.onPageChange,
@@ -293,6 +344,8 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
 
     // Pending ds:get-state requests by requestId.
     const pendingStateRef = useRef(new Map<string, PendingState>())
+    // The person's menu as the embed last said (empty for one item): open() checks an id against it in development.
+    const itemsRef = useRef<EmbedMenuItem[] | null>(null)
 
     // Whether the page in the frame has spoken (so its bridge listens), and the commands waiting for it to.
     const liveRef = useRef(false)
@@ -359,7 +412,16 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         switch (msg.type) {
           case 'ds:ready':
             setStatus('ready')
-            cb.onReady?.({ contentType: msg.contentType, pages: msg.pages.map((p) => ({ id: p.id, name: p.name })) })
+            itemsRef.current = msg.items ?? []
+            cb.onReady?.({
+              contentType: msg.contentType,
+              pages: msg.pages.map((p) => ({ id: p.id, name: p.name })),
+              item: msg.item ?? null,
+              items: msg.items ?? [],
+            })
+            break
+          case 'ds:item-change':
+            cb.onItemChange?.(msg.item)
             break
           case 'ds:resize':
             setReportedHeight(msg.height)
@@ -436,6 +498,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
 
     const reload = useCallback(() => {
       liveRef.current = false
+      itemsRef.current = null
       clearTimeout(loadTimerRef.current)
       setReportedHeight(null)
       setReloadKey((k) => k + 1)
@@ -447,6 +510,18 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
         setParams: (p) => post({ type: 'ds:set-params', version: EMBED_PROTOCOL_VERSION, params: p }),
         setPage: (pageId) => post({ type: 'ds:set-page', version: EMBED_PROTOCOL_VERSION, pageId }),
         refresh: () => post({ type: 'ds:refresh', version: EMBED_PROTOCOL_VERSION }),
+        open: (itemId) => {
+          if (DEV && itemsRef.current && !itemsRef.current.some((i) => i.id === itemId)) {
+            warnOnce(
+              warned,
+              `open:${itemId}`,
+              itemsRef.current.length === 0
+                ? `open(${JSON.stringify(itemId)}): this embed shows one item. A token whose content is { type: 'menu' } opens a menu.`
+                : `open(${JSON.stringify(itemId)}): no item of this person's menu has that id; the embed ignores it.`,
+            )
+          }
+          post({ type: 'ds:open', version: EMBED_PROTOCOL_VERSION, itemId })
+        },
         reload,
         requestFullscreen: async () => {
           const frame = iframeRef.current
@@ -468,7 +543,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
           })
         },
       }),
-      [post, reload],
+      [post, reload, warned],
     )
 
     const frame = (

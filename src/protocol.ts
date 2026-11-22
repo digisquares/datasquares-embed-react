@@ -25,14 +25,40 @@ export type EmbedContentType = 'dashboard' | 'report' | 'presentation'
 
 const CONTENT_TYPES: ReadonlySet<unknown> = new Set<EmbedContentType>(['dashboard', 'report', 'presentation'])
 
+/**
+ * An item of a person's menu (a token whose content is `{ type: 'menu' }`): its label in the embed app, else the
+ * content's own name, and the section heading it sits under.
+ */
+export interface EmbedMenuItem {
+  id: string
+  type: EmbedContentType
+  name: string
+  section: string | null
+}
+
 // ── Embed → host (events the SDK surfaces as callbacks) ─────────────────
 
 export interface EmbedReadyMessage {
   type: 'ds:ready'
   version: typeof EMBED_PROTOCOL_VERSION
-  contentType: EmbedContentType
+  /** `menu` while the embed's gallery shows the person's menu and no item is open yet. */
+  contentType: EmbedContentType | 'menu'
   /** A dashboard's pages; none for a report, a one-page dashboard or a presentation. */
   pages: Array<{ id: string; name: string }>
+  /**
+   * The item shown, of a menu; null for an embed of one item (or a gallery with none open). Absent from an embed that
+   * predates menus, which the SDK reads as null.
+   */
+  item?: EmbedMenuItem | null
+  /** The person's menu, in order; empty for an embed of one item. Absent from an embed that predates menus (none). */
+  items?: EmbedMenuItem[]
+}
+
+/** Another item of the menu is shown: picked in the embed's own menu, or opened by the host. */
+export interface EmbedItemChangeMessage {
+  type: 'ds:item-change'
+  version: typeof EMBED_PROTOCOL_VERSION
+  item: EmbedMenuItem
 }
 
 export interface EmbedResizeMessage {
@@ -94,6 +120,7 @@ export interface EmbedTokenRequestMessage {
 
 export type EmbedOutMessage =
   | EmbedReadyMessage
+  | EmbedItemChangeMessage
   | EmbedResizeMessage
   | EmbedErrorMessage
   | EmbedPageChangeMessage
@@ -134,13 +161,21 @@ export interface TokenCommand {
   token: string
 }
 
-export type EmbedInMessage = SetParamsCommand | SetPageCommand | RefreshCommand | GetStateCommand | TokenCommand
+/** Open another item of the person's menu (an id not in it is ignored by the embed). */
+export interface OpenCommand {
+  type: 'ds:open'
+  version: typeof EMBED_PROTOCOL_VERSION
+  itemId: string
+}
+
+export type EmbedInMessage = SetParamsCommand | SetPageCommand | RefreshCommand | GetStateCommand | TokenCommand | OpenCommand
 
 /** The longest token the embed accepts in a `ds:token` (it drops a longer or an empty one). */
 export const MAX_EMBED_TOKEN_CHARS = 8192
 
 const OUT_TYPES = new Set([
   'ds:ready',
+  'ds:item-change',
   'ds:resize',
   'ds:error',
   'ds:page-change',
@@ -153,6 +188,13 @@ const OUT_TYPES = new Set([
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const isPage = (p: unknown): boolean => isRecord(p) && typeof p.id === 'string' && typeof p.name === 'string'
+
+const isMenuItem = (i: unknown): i is EmbedMenuItem =>
+  isRecord(i) &&
+  typeof i.id === 'string' &&
+  CONTENT_TYPES.has(i.type) &&
+  typeof i.name === 'string' &&
+  (i.section === null || typeof i.section === 'string')
 
 /**
  * Structural guard over untrusted postMessage data. The host validates source
@@ -174,7 +216,15 @@ export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
     case 'ds:resize':
       return typeof msg.height === 'number' && Number.isFinite(msg.height) && msg.height >= 0
     case 'ds:ready':
-      return CONTENT_TYPES.has(msg.contentType) && Array.isArray(msg.pages) && msg.pages.every(isPage)
+      return (
+        (CONTENT_TYPES.has(msg.contentType) || msg.contentType === 'menu') &&
+        Array.isArray(msg.pages) &&
+        msg.pages.every(isPage) &&
+        (msg.item === undefined || msg.item === null || isMenuItem(msg.item)) &&
+        (msg.items === undefined || (Array.isArray(msg.items) && msg.items.every(isMenuItem)))
+      )
+    case 'ds:item-change':
+      return isMenuItem(msg.item)
     case 'ds:error':
       return typeof msg.kind === 'string'
     case 'ds:page-change':
