@@ -1,7 +1,7 @@
 /**
  * Server-side signer for the two-key design (DataSquares AI plan chapter 12).
  *
- * ⚠ SERVER ONLY. Import it from `@digisquares/datasquares-embed-react/server` in
+ * ⚠ SERVER ONLY. Import it from `@digisquares/datasquares-react/server` in
  * your backend, never in a browser bundle: it takes your embed app's secret.
  *
  *   - The company key: an embed app a company admin makes in DataSquares

@@ -1,5 +1,5 @@
 /**
- * `@digisquares/datasquares-embed-react/testing` — a stand-in for the DataSquares embed, for your own tests of a page
+ * `@digisquares/datasquares-react/testing` — a stand-in for the DataSquares embed, for your own tests of a page
  * that hosts `<DataSquaresEmbed>` (Vitest or Jest, in jsdom or happy-dom). It takes the place of the iframe's window,
  * records every command your page sends, and speaks as the embed — from the right window, at the right origin — so
  * your callbacks run as they would against DataSquares, with no network:

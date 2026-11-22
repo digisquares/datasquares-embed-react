@@ -99,7 +99,7 @@ export interface DataSquaresEmbedProps {
   /**
    * Two keys: returns a short-lived token YOUR server signed for the current
    * person with your embed app's key (`signEmbedToken` from
-   * `@digisquares/datasquares-embed-react/server`). Called when the embed
+   * `@digisquares/datasquares-react/server`). Called when the embed
    * starts and whenever its session needs renewing. The token names the
    * content, so `contentId` and `token` are not used with it.
    */

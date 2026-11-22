@@ -31,6 +31,6 @@ export type {
   SetParamsCommand,
   TokenCommand,
 } from './protocol.js'
-// The test stand-in for the embed is its own entry too, `@digisquares/datasquares-embed-react/testing`.
-// The server-side signer is its own entry, `@digisquares/datasquares-embed-react/server`, so a browser bundle never
+// The test stand-in for the embed is its own entry too, `@digisquares/datasquares-react/testing`.
+// The server-side signer is its own entry, `@digisquares/datasquares-react/server`, so a browser bundle never
 // carries a function that takes your embed app's secret.

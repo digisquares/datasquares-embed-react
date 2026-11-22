@@ -2,6 +2,13 @@
 
 ## 0.4.0
 
+### Renamed
+
+- The package is now `@digisquares/datasquares-react`. Versions up to 0.3.0
+  were published as `@digisquares/datasquares-embed-react`, which is
+  deprecated. Swap the name in `package.json` and in your imports; nothing
+  else changes.
+
 ### Added
 
 - `page` prop: the dashboard page to open on (`?page=` on both embed URLs).
@@ -21,7 +28,7 @@
   Deno, Workers) and `createEmbedTokenMiddleware` (Node, Express) on `/server`:
   a token route from a `claims(request)` function — 200 with `no-store`, 401
   when no one is signed in, 500 without the reason when signing fails.
-- `@digisquares/datasquares-embed-react/testing`: `simulateEmbed()`, a
+- `@digisquares/datasquares-react/testing`: `simulateEmbed()`, a
   stand-in embed for the host's own tests.
 - Development warnings: `getToken` with `token`/`contentId`, `baseUrl` over
   plain http to another machine, a failure with no `onError`.

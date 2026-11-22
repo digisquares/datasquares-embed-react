@@ -1,4 +1,4 @@
-# @digisquares/datasquares-embed-react
+# @digisquares/datasquares-react
 
 React SDK for embedding DataSquares dashboards, reports and presentations: the
 `<DataSquaresEmbed>` component and the `useDataSquaresEmbed()` hook, typed
@@ -8,7 +8,7 @@ server in three lines, and a stand-in embed for your tests.
 ## Install
 
 ```sh
-npm install @digisquares/datasquares-embed-react
+npm install @digisquares/datasquares-react
 ```
 
 Or straight from the repository (builds on install via the `prepare` script):
@@ -31,7 +31,7 @@ for a session bound to your site.
 
 ```ts
 // On YOUR server: an Express route your page calls
-import { createEmbedTokenMiddleware } from '@digisquares/datasquares-embed-react/server'
+import { createEmbedTokenMiddleware } from '@digisquares/datasquares-react/server'
 
 app.get('/analytics-token', requireSignedIn, createEmbedTokenMiddleware({
   clientId: process.env.DS_EMBED_CLIENT_ID!,
@@ -49,7 +49,7 @@ app.get('/analytics-token', requireSignedIn, createEmbedTokenMiddleware({
 
 ```ts
 // Or a Next.js route handler (also Remix, Hono, Bun, Deno, Workers): app/analytics-token/route.ts
-import { createEmbedTokenHandler } from '@digisquares/datasquares-embed-react/server'
+import { createEmbedTokenHandler } from '@digisquares/datasquares-react/server'
 
 export const GET = createEmbedTokenHandler({
   clientId: process.env.DS_EMBED_CLIENT_ID!,
@@ -69,7 +69,7 @@ hand, `signEmbedToken({ clientId, keyId, secret, ...claims })` returns the token
 
 ```tsx
 import { useRef } from 'react'
-import { DataSquaresEmbed, type DataSquaresEmbedHandle } from '@digisquares/datasquares-embed-react'
+import { DataSquaresEmbed, type DataSquaresEmbedHandle } from '@digisquares/datasquares-react'
 
 function Analytics() {
   const embed = useRef<DataSquaresEmbedHandle>(null)
@@ -142,7 +142,7 @@ component cannot pass. Wrap it in a client component of your own:
 
 ```tsx
 'use client'
-import { DataSquaresEmbed } from '@digisquares/datasquares-embed-react'
+import { DataSquaresEmbed } from '@digisquares/datasquares-react'
 
 export function Analytics() {
   return <DataSquaresEmbed baseUrl="https://app.datasquares.ai" getToken={() => fetch('/analytics-token').then((r) => r.text())} />
@@ -151,7 +151,7 @@ export function Analytics() {
 
 `buildEmbedUrl` and `buildSessionEmbedUrl` are plain functions in their own
 module and can be called from server code. Sign tokens in a route handler with
-`createEmbedTokenHandler` from `@digisquares/datasquares-embed-react/server`
+`createEmbedTokenHandler` from `@digisquares/datasquares-react/server`
 (above).
 
 ## Props
@@ -215,7 +215,7 @@ Rather than wiring callbacks and a ref, spread the hook's `bind` onto the
 component and render from its state:
 
 ```tsx
-import { DataSquaresEmbed, useDataSquaresEmbed } from '@digisquares/datasquares-embed-react'
+import { DataSquaresEmbed, useDataSquaresEmbed } from '@digisquares/datasquares-react'
 
 function Analytics() {
   const embed = useDataSquaresEmbed({ onPointClick: ({ value }) => track('drill', value) })
@@ -273,7 +273,7 @@ The frame loaded but the embed never spoke. In order of likelihood:
 
 ## Testing your integration
 
-`@digisquares/datasquares-embed-react/testing` stands in for the embed in your
+`@digisquares/datasquares-react/testing` stands in for the embed in your
 own tests (Vitest or Jest, jsdom or happy-dom): it records the commands your
 page sends, and speaks as the embed from the right window and origin, so your
 callbacks run as they would against DataSquares, with no network.
@@ -281,7 +281,7 @@ callbacks run as they would against DataSquares, with no network.
 ```tsx
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { simulateEmbed } from '@digisquares/datasquares-embed-react/testing'
+import { simulateEmbed } from '@digisquares/datasquares-react/testing'
 
 it('shows the pages and switches on click', async () => {
   render(<Analytics />)
@@ -300,7 +300,16 @@ in application code: it replaces the frame's window.
 
 ## Upgrading from 0.3
 
-Nothing to change. New: `page`, `loadTimeoutMs`, `loadingFallback`,
+The package has a new name: `@digisquares/datasquares-react` (it was
+`@digisquares/datasquares-embed-react`, which stays at 0.3 and is deprecated).
+Swap the name in `package.json` and in your imports, including `/server`:
+
+```sh
+npm uninstall @digisquares/datasquares-embed-react
+npm install @digisquares/datasquares-react
+```
+
+Nothing else to change. New: `page`, `loadTimeoutMs`, `loadingFallback`,
 `errorFallback`, `onStatusChange`, `reload()`, `requestFullscreen()`,
 `useDataSquaresEmbed()`, `createEmbedTokenHandler`,
 `createEmbedTokenMiddleware` and the `/testing` entry. What behaves

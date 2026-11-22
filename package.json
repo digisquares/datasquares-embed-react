@@ -1,5 +1,5 @@
 {
-  "name": "@digisquares/datasquares-embed-react",
+  "name": "@digisquares/datasquares-react",
   "version": "0.4.0",
   "description": "React SDK for embedding DataSquares dashboards, reports and presentations: the <DataSquaresEmbed> component, typed events, host-side controls (params, pages, refresh), and a server-side signer for each person's short-lived embed token.",
   "type": "module",
@@ -60,6 +60,7 @@
     "datasquares",
     "embed",
     "embedded-analytics",
+    "analytics",
     "dashboard",
     "react"
   ]
