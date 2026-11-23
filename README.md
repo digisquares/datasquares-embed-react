@@ -435,6 +435,83 @@ In your tests, `simulateChat(iframe)` from `/testing` speaks as the chat:
 `requestToken()`, and `commands` and `context` (the latest one sent) to assert
 on. In `panel` mode, open the panel first: the frame mounts then.
 
+## Without React: `<datasquares-chat>` and `<datasquares-embed>`
+
+The same chat and embed as plain custom elements, for any page: no framework,
+nothing to build. One script defines both:
+
+```html
+<script type="module" src="https://unpkg.com/@digisquares/datasquares-react@0.4.0/dist/element.js"></script>
+
+<datasquares-embed id="board" base-url="https://app.datasquares.ai" token-url="/analytics-token" menu="tabs"></datasquares-embed>
+
+<datasquares-chat
+  base-url="https://app.datasquares.ai"
+  token-url="/analytics-token"
+  follows="board"
+  suggestions='["How did sales do this month?", "Which region is behind?"]'
+></datasquares-chat>
+```
+
+Or from npm in a bundled app: `import '@digisquares/datasquares-react/element'`
+(React is not needed for it: it is an optional peer).
+
+`token-url` is your server's token route (the same one the React components'
+`getToken` calls): the element fetches it, with the page's cookies, when the
+frame asks for the person's token, and reads the body as the token (text, or
+`{ "token": "…" }`). Or set a function: `el.getToken = () => …`. The token never
+goes in an address.
+
+**`<datasquares-chat>`**
+
+| Attribute | |
+|---|---|
+| `base-url` | Your DataSquares app URL (required). |
+| `token-url` | Your token route (or the `getToken` property). |
+| `mode`, `open` | `panel` (default), `inline` or `fullscreen`; `open` opens a panel. The element updates them when the person switches in the chat. |
+| `follows` | The id of a `<datasquares-embed>` on the page: the menu item it shows and the filters the person sets become the chat's context. |
+| `chat-title`, `greeting`, `placeholder` | The chat's heading, what it says first, the question field's placeholder (`title` is HTML's own tooltip attribute, so the heading is `chat-title`). |
+| `suggestions` | A JSON array of questions, or one question a line (up to four). |
+| `scope`, `item`, `conversation` | As the React props. |
+| `theme`, `primary-color`, `logo-url`, `background`, `font` | The look. |
+| `launcher-label`, `position`, `panel-width`, `panel-height`, `height`, `z-index`, `load-timeout`, `frame-title` | As the React props. |
+
+Methods: `ask(question)`, `newConversation()`, `openConversation(id)`,
+`setMode(mode)`, `setOpen(open)`, `setContext(context)` (or set the `context`
+property), `reload()`. Properties: `status`, `error`.
+
+Events (each a bubbling `CustomEvent` whose `detail` is what the React callback
+gets): `ds-ready`, `ds-answer`, `ds-feedback`, `ds-follow-up`,
+`ds-conversation-change`, `ds-limit`, `ds-mode-change`, `ds-open-change`,
+`ds-error`, `ds-status-change`. A `ds-mode-change` the person started in the chat
+is cancelable: `preventDefault()` keeps the mode you chose.
+
+```js
+const chat = document.querySelector('datasquares-chat')
+chat.addEventListener('ds-feedback', (e) => sendToSupport(e.detail))
+chat.ask('Why did margin drop?')
+```
+
+**`<datasquares-embed>`**
+
+| Attribute | |
+|---|---|
+| `base-url` | Your DataSquares app URL (required). |
+| `token-url` | Each person's embed: your token route (or the `getToken` property). |
+| `share-token`, `content-id` | A share link's embed instead. |
+| `theme`, `toolbar`, `primary-color`, `logo-url`, `page`, `tabs`, `background`, `font`, `padding`, `item`, `menu` | As the React props. |
+| `params` | Parameter values, as a JSON object. |
+| `height`, `auto-height` | The frame's height (default 600), or grow to the content. |
+| `load-timeout`, `frame-title` | As the React props. |
+
+Methods: `setParams(params)`, `setPage(id)`, `open(itemId)`, `refresh()`,
+`getState()` (a promise), `reload()`. Events: `ds-ready`, `ds-item-change`,
+`ds-page-change`, `ds-point-click`, `ds-filter-change`, `ds-resize`, `ds-error`,
+`ds-status-change`.
+
+Both draw in a shadow root: style the launcher, the box and the frame from your
+page with `::part(launcher)`, `::part(box)` and `::part(frame)`.
+
 ## Troubleshooting: `timeout`
 
 The frame loaded but the embed never spoke. In order of likelihood:

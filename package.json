@@ -1,7 +1,7 @@
 {
   "name": "@digisquares/datasquares-react",
   "version": "0.4.0",
-  "description": "React SDK for DataSquares: embed dashboards, reports and presentations (one or a menu of them, in your own look) and the DataSquares AI chat over them, with typed events, host-side controls, each person's signed token from your server, and stand-ins for your tests.",
+  "description": "React SDK and web components for DataSquares: embed dashboards, reports and presentations (one or a menu of them, in your own look) and the DataSquares AI chat over them, with typed events, host-side controls, each person's signed token from your server, and stand-ins for your tests.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,6 +21,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./element": {
+      "types": "./dist/element.d.ts",
+      "import": "./dist/element.js",
+      "default": "./dist/element.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -28,7 +33,10 @@
     "src",
     "CHANGELOG.md"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/element.js",
+    "./src/element.ts"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -41,6 +49,11 @@
   },
   "peerDependencies": {
     "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
@@ -63,6 +76,7 @@
     "analytics",
     "dashboard",
     "ai-chat",
-    "react"
+    "react",
+    "web-components"
   ]
 }

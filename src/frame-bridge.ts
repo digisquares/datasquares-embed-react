@@ -14,28 +14,13 @@
  *    `ds:ready` is `ready`. Every message, these included, then reaches `onMessage`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { EMBED_PROTOCOL_VERSION, MAX_EMBED_TOKEN_CHARS, isEmbedOutMessage, type EmbedErrorKind, type EmbedInMessage, type EmbedOutMessage } from './protocol.js'
+import { EMBED_PROTOCOL_VERSION, MAX_EMBED_TOKEN_CHARS, isEmbedOutMessage, type EmbedInMessage, type EmbedOutMessage } from './protocol.js'
 import { DEV } from './dev.js'
 
-/**
- * What `onError` hears: one of the embed's own kinds, or `timeout` — the frame loaded but the embed never spoke within
- * `loadTimeoutMs` (it cannot run there; see the README's troubleshooting).
- */
-export type EmbedHostErrorKind = EmbedErrorKind | 'timeout'
+import { DEFAULT_LOAD_TIMEOUT_MS, type EmbedError, type EmbedHostErrorKind, type EmbedStatus } from './frame-channel.js'
 
-/**
- * What `onError` hears. `cause` is set when your own `getToken` failed (it threw, or gave no usable token; `kind` is
- * then `invalid`) and on a `timeout` (an Error naming the likely reasons).
- */
-export interface EmbedError {
-  kind: EmbedHostErrorKind
-  cause?: unknown
-}
-
-/** `loading` until the embed has rendered (`ready`) or could not (`error`); a new `src` or `reload()` loads again. */
-export type EmbedStatus = 'loading' | 'ready' | 'error'
-
-export const DEFAULT_LOAD_TIMEOUT_MS = 15_000
+export { DEFAULT_LOAD_TIMEOUT_MS }
+export type { EmbedError, EmbedHostErrorKind, EmbedStatus }
 
 export interface FrameBridgeOptions {
   /** The DataSquares origin of `baseUrl`: the one origin listened to and posted to. */

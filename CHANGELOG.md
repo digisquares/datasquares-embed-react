@@ -39,6 +39,14 @@
   the chat; `ds:chat-feedback`, `ds:chat-follow-up` from it. `/testing`:
   `feedback()`, `followUp()`, `context`. README: What the person is looking
   at; Follow-ups and ratings.
+- `<datasquares-chat>` and `<datasquares-embed>`: the chat and the embed as
+  framework-free custom elements, for pages without React —
+  `@digisquares/datasquares-react/element`, or one script tag from a CDN. The
+  person's token from `token-url` (or a `getToken` property); attributes for
+  every option, the same commands as methods, `ds-…` DOM events, `follows` (the
+  chat takes a `<datasquares-embed>`'s item and filters as its context), and
+  `::part()` styling. React becomes an optional peer dependency. README: Without
+  React.
 - Menus: a token whose content is `{ type: 'menu' }` (or `{ type: 'menu',
   items }`, 1 to 100 content ids, for some of them) opens the embed app's menu.
   The embed draws it in the app's layout or the `menu` prop's (`sidebar`,
