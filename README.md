@@ -349,13 +349,16 @@ first opens.
 | `title`, `greeting`, `placeholder` | The chat's heading (default "Ask AI"), what it says before the first question, the question field's placeholder. |
 | `suggestions` | Up to four questions to start with (default: questions about the menu's first items). |
 | `conversation` | One of the person's earlier conversations to open first (its id, from `onConversationChange`). |
+| `context` | What the person is looking at in your page; each question carries it (below). |
 | `theme`, `primaryColor`, `logoUrl`, `background`, `font` | The look, as on the embed; each wins over the app's. The *Powered by DataSquares* credit always shows. |
 | `loadTimeoutMs`, `loadingFallback`, `errorFallback`, `frameTitle`, `zIndex` | As on the embed. |
 
 | Event | Fires when |
 |---|---|
 | `onReady` | the chat can answer; with a menu token, `items` is the menu it asks about |
-| `onAnswer` | an answer is finished: `{ question, answer, conversationId, blocked }` (`blocked`: it was withheld) |
+| `onAnswer` | an answer is finished: `{ question, answer, conversationId, blocked, followUps, answerIndex }` (`blocked`: it was withheld; `followUps`: the questions it offers next; `answerIndex`: its number in the conversation) |
+| `onFeedback` | the person rated an answer: `{ conversationId, answerIndex, rating, reason, note }` (`rating`: `up` or `down`; `reason` for a `down`; `note`: what they typed, which only you get) |
+| `onFollowUp` | the person picked a question instead of typing it: `{ conversationId, question, source }` (`source`: `follow-up` under an answer, or `suggestion`) |
 | `onConversationChange` | another conversation shows (a new one: `null` until its first answer) |
 | `onLimitReached` | a monthly budget or an hourly limit stopped a question: `{ code, scope, message }` (`scope`: `person` or `tenant`); the chat says so in its own words |
 | `onError` | it could not start (`forbidden` includes a token without Ask AI), never spoke (`timeout`), or `getToken` failed |
@@ -368,8 +371,53 @@ chat.current?.newConversation()
 chat.current?.openConversation(id)
 chat.current?.setMode('fullscreen')
 chat.current?.setOpen(false)
+chat.current?.setContext({ itemId, filters })
 chat.current?.reload()
 ```
+
+### What the person is looking at: `context`
+
+Tell the chat which menu item the person is on, a card in focus, the filters
+they have on, or a short note, and each question carries it: "why did this
+drop?" is about what they see. The chat shows it on a chip above the question
+field, which the person can set aside until you send a new one. It is a hint,
+never access: an item outside the person's menu is ignored, and the filters
+only narrow the rows the item's cards show them.
+
+| Field | |
+|---|---|
+| `itemId` | The menu item the person is on: its id, as `onReady`'s `items` and `<DataSquaresEmbed onItemChange>` give it. |
+| `cardId` | A card (or report block) on it, in focus. |
+| `filters` | The filters they have on it, as `<DataSquaresEmbed onFilterChange>` gives them (20 at most). |
+| `note` | A short line about what they are doing (300 characters at most). |
+| `label` | The chip's name for it (80 at most; default the menu item's name). |
+
+With the dashboard embed beside the chat, pass its events along:
+
+```tsx
+const [context, setContext] = useState<ChatContext | null>(null)
+
+<DataSquaresEmbed
+  baseUrl={BASE}
+  getToken={getToken}
+  onItemChange={(item) => setContext({ itemId: item.id })}
+  onFilterChange={(filters) => setContext((c) => ({ ...c, filters }))}
+/>
+<DataSquaresChat baseUrl={BASE} getToken={getToken} context={context} />
+```
+
+`context` is compared by its contents, so a new object with the same fields
+sends nothing. `setContext()` on the handle (or the hook) does the same
+imperatively; `null` clears it.
+
+### Follow-ups and ratings
+
+Under the latest answer the chat offers up to three follow-up questions, made
+from what the answer read (no extra AI call). Each answer kept in the person's
+conversation can be rated helpful or not, with a reason; the person may add a
+note. DataSquares keeps the rating and the reason (they appear, counted, on
+Administration → Usage); the note goes to `onFeedback` only, so you can send it
+to your own support or product tools.
 
 `useDataSquaresChat()` holds the mode and the panel's state for you and gives
 `status`, `error`, `mode`, `open`, `items`, `conversationId`, `lastAnswer`,
@@ -382,8 +430,9 @@ const chat = useDataSquaresChat({ defaultMode: 'panel' })
 ```
 
 In your tests, `simulateChat(iframe)` from `/testing` speaks as the chat:
-`ready({ items })`, `answer(…)`, `conversationChange(id)`, `limit(…)`,
-`requestMode(mode)`, `error(kind)`, `requestToken()`, and `commands` to assert
+`ready({ items })`, `answer(…)`, `feedback(…)`, `followUp(…)`,
+`conversationChange(id)`, `limit(…)`, `requestMode(mode)`, `error(kind)`,
+`requestToken()`, and `commands` and `context` (the latest one sent) to assert
 on. In `panel` mode, open the panel first: the frame mounts then.
 
 ## Troubleshooting: `timeout`

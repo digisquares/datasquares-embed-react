@@ -19,14 +19,34 @@
  * Messages are pinned to this iframe's window and the DataSquares origin of `baseUrl`; commands wait until the chat
  * listens; the person's signed token is handed over when the chat asks (`getToken`, the same server route as the
  * embed's), never in a URL; a chat that never speaks is `timeout` (frame-bridge.ts).
+ *
+ * ── What the person is looking at ───────────────────────────────────────
+ * `context` (or `setContext()`) tells the chat which menu item the person is on, a card, the filters they have on, a
+ * short note: each question carries it, and the chat shows it on a chip the person can set aside. With
+ * `<DataSquaresEmbed>` beside it, pass its `onItemChange` and `onFilterChange` along. A hint, never access.
+ *
+ * ── What you hear ───────────────────────────────────────────────────────
+ * Each answer (`onAnswer`, with the follow-ups it offers), each rating (`onFeedback`: helpful or not, why, and the
+ * person's note, which only you get), each follow-up or suggestion picked (`onFollowUp`), each conversation change and
+ * each limit reached.
  */
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { EMBED_PROTOCOL_VERSION, MAX_CHAT_QUESTION_CHARS, type ChatMode, type EmbedInMessage, type EmbedMenuItem, type EmbedOutMessage } from './protocol.js'
+import {
+  CHAT_CONTEXT_LIMITS,
+  EMBED_PROTOCOL_VERSION,
+  MAX_CHAT_QUESTION_CHARS,
+  type ChatContext,
+  type ChatFeedbackReason,
+  type ChatMode,
+  type EmbedInMessage,
+  type EmbedMenuItem,
+  type EmbedOutMessage,
+} from './protocol.js'
 import { buildChatUrl, embedOrigin as originOf, type EmbedFont } from './urls.js'
 import { DEV, isInsecureRemote, warnOnce } from './dev.js'
 import { DEFAULT_LOAD_TIMEOUT_MS, useFrameBridge, type EmbedError, type EmbedStatus } from './frame-bridge.js'
 
-export type { ChatMode } from './protocol.js'
+export type { ChatContext, ChatFeedbackReason, ChatMode } from './protocol.js'
 
 /** What `onReady` hears: the menu the chat asks about (empty when it asks about one dashboard or report). */
 export interface ChatReadyInfo {
@@ -39,6 +59,29 @@ export interface ChatAnswer {
   answer: string
   conversationId: string | null
   blocked: boolean
+  /** The follow-up questions it offers. */
+  followUps: string[]
+  /** Its number in the conversation (0 first), as `onFeedback` names it; null when it was not kept. */
+  answerIndex: number | null
+}
+
+/** The person rated an answer. */
+export interface ChatFeedback {
+  conversationId: string
+  answerIndex: number
+  rating: 'up' | 'down'
+  /** Why it was not helpful (a `down` rating). */
+  reason: ChatFeedbackReason | null
+  /** What the person typed about it. Only you get it: DataSquares keeps the rating and the reason, never the note. */
+  note: string | null
+}
+
+/** The person picked a question instead of typing it. */
+export interface ChatFollowUp {
+  conversationId: string | null
+  question: string
+  /** `follow-up`: offered under an answer; `suggestion`: one of the questions to start with. */
+  source: 'follow-up' | 'suggestion'
 }
 
 /** One of the embed app's monthly budgets or hourly limits stopped a question: the person's, or their organization's. */
@@ -82,6 +125,11 @@ export interface DataSquaresChatProps {
   suggestions?: readonly string[]
   /** One of the person's earlier conversations to open first (its id, from `onConversationChange`). */
   conversation?: string
+  /**
+   * What the person is looking at in your page (the menu item, a card, their filters, a note); each question carries it.
+   * Compared by its contents; null clears it. `setContext()` does the same imperatively.
+   */
+  context?: ChatContext | null
   /** `light`, `dark`, or `auto` (follows the viewer's system); omit for the embed app's look. */
   theme?: 'light' | 'dark' | 'auto'
   /** Your brand colour: hex without the hash, or any CSS colour. Also the launcher's. */
@@ -121,6 +169,10 @@ export interface DataSquaresChatProps {
   onConversationChange?: (conversationId: string | null) => void
   /** A budget or an hourly limit of the embed app's stopped a question; the chat says so in its own words. */
   onLimitReached?: (limit: ChatLimit) => void
+  /** The person rated an answer (helpful or not, why, and their note). */
+  onFeedback?: (feedback: ChatFeedback) => void
+  /** The person picked a follow-up under an answer, or one of the suggestions. */
+  onFollowUp?: (pick: ChatFollowUp) => void
   /** The chat could not start (a bad token, a site not allowed, no Ask AI: `forbidden`), never spoke, or getToken failed. */
   onError?: (error: EmbedError) => void
   onStatusChange?: (status: EmbedStatus) => void
@@ -135,6 +187,8 @@ export interface DataSquaresChatHandle {
   openConversation: (conversationId: string) => void
   /** Show the chat another way. */
   setMode: (mode: ChatMode) => void
+  /** Tell the chat what the person is looking at (null: nothing). Each question carries it until the next. */
+  setContext: (context: ChatContext | null) => void
   /** `panel` mode: open or fold the panel. */
   setOpen: (open: boolean) => void
   /** Load the chat again from the start (a new token). */
@@ -142,7 +196,31 @@ export interface DataSquaresChatHandle {
 }
 
 /** Commands of these kinds replace a waiting one of the same kind. */
-const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-mode', 'ds:open-conversation', 'ds:new-conversation'])
+const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-mode', 'ds:open-conversation', 'ds:new-conversation', 'ds:set-context'])
+
+/** A context within the chat's bounds: what is past them is left out (and, in development, said). */
+function boundedContext(c: ChatContext | null, warn: (text: string) => void): ChatContext | null {
+  if (!c) return null
+  const out: ChatContext = {}
+  const L = CHAT_CONTEXT_LIMITS
+  const text = (key: 'itemId' | 'cardId' | 'note' | 'label', max: number) => {
+    const v = c[key]
+    if (typeof v !== 'string' || !v.trim()) return
+    if (v.length > max) warn(`setContext(): ${key} is at most ${max} characters; it was left out.`)
+    else out[key] = v
+  }
+  text('itemId', L.itemId)
+  text('cardId', L.cardId)
+  text('note', L.note)
+  text('label', L.label)
+  if (Array.isArray(c.filters) && c.filters.length > 0) {
+    const ok = c.filters.filter((f) => f && typeof f.fieldId === 'string' && f.fieldId && typeof f.operator === 'string' && f.operator)
+    if (ok.length < c.filters.length) warn('setContext(): a filter needs a fieldId and an operator; those without were left out.')
+    if (ok.length > L.filters) warn(`setContext(): at most ${L.filters} filters; the rest were left out.`)
+    if (ok.length > 0) out.filters = ok.slice(0, L.filters)
+  }
+  return out
+}
 
 const NARROW = '(max-width: 640px)'
 
@@ -257,7 +335,20 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
         if (msg.contentType === 'chat') cb.onReady?.({ items: msg.items ?? [] })
         break
       case 'ds:chat-answer':
-        cb.onAnswer?.({ question: msg.question, answer: msg.answer, conversationId: msg.conversationId, blocked: msg.blocked })
+        cb.onAnswer?.({
+          question: msg.question,
+          answer: msg.answer,
+          conversationId: msg.conversationId,
+          blocked: msg.blocked,
+          followUps: msg.followUps ?? [],
+          answerIndex: msg.answerIndex ?? null,
+        })
+        break
+      case 'ds:chat-feedback':
+        cb.onFeedback?.({ conversationId: msg.conversationId, answerIndex: msg.answerIndex, rating: msg.rating, reason: msg.reason, note: msg.note })
+        break
+      case 'ds:chat-follow-up':
+        cb.onFollowUp?.({ conversationId: msg.conversationId, question: msg.question, source: msg.source })
         break
       case 'ds:conversation-change':
         cb.onConversationChange?.(msg.conversationId)
@@ -294,6 +385,22 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
   useEffect(() => {
     post({ type: 'ds:set-mode', version: EMBED_PROTOCOL_VERSION, mode, ...(mode === 'fullscreen' ? { exitTo } : {}) })
   }, [post, mode, exitTo, src, reloadKey])
+
+  // What the person is looking at: the `context` prop by its contents, or the latest setContext(); a new page in the
+  // frame hears it again.
+  const warnContext = useCallback((text: string) => {
+    if (DEV) warnOnce(warned, text, text)
+  }, [warned])
+  const contextRef = useRef<ChatContext | null | undefined>(undefined)
+  const contextKey = props.context === undefined ? undefined : JSON.stringify(props.context)
+  useEffect(() => {
+    if (contextKey === undefined) return
+    contextRef.current = boundedContext(props.context ?? null, warnContext)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the prop by its contents (contextKey)
+  }, [contextKey, warnContext])
+  useEffect(() => {
+    if (contextRef.current !== undefined) post({ type: 'ds:set-context', version: EMBED_PROTOCOL_VERSION, context: contextRef.current })
+  }, [post, contextKey, src, reloadKey])
 
   // Full screen: Esc (with focus on your page) goes back, and the page behind does not scroll.
   useEffect(() => {
@@ -335,10 +442,14 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
       newConversation: () => post({ type: 'ds:new-conversation', version: EMBED_PROTOCOL_VERSION }),
       openConversation: (conversationId) => post({ type: 'ds:open-conversation', version: EMBED_PROTOCOL_VERSION, conversationId }),
       setMode: (next) => goToRef.current(next),
+      setContext: (next) => {
+        contextRef.current = boundedContext(next, warnContext)
+        post({ type: 'ds:set-context', version: EMBED_PROTOCOL_VERSION, context: contextRef.current })
+      },
       setOpen: (next) => changeOpen(next),
       reload,
     }),
-    [post, reload, changeOpen, warned],
+    [post, reload, changeOpen, warned, warnContext],
   )
 
   const panelId = useId()

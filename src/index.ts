@@ -3,13 +3,14 @@ export type { DataSquaresEmbedProps, DataSquaresEmbedHandle, EmbedError, EmbedHo
 export { useDataSquaresEmbed } from './use-embed.js'
 export type { UseDataSquaresEmbed, DataSquaresEmbedBinding } from './use-embed.js'
 export { DataSquaresChat } from './DataSquaresChat.js'
-export type { DataSquaresChatProps, DataSquaresChatHandle, ChatAnswer, ChatLimit, ChatReadyInfo } from './DataSquaresChat.js'
+export type { DataSquaresChatProps, DataSquaresChatHandle, ChatAnswer, ChatFeedback, ChatFollowUp, ChatLimit, ChatReadyInfo } from './DataSquaresChat.js'
 export { useDataSquaresChat } from './use-chat.js'
 export type { UseDataSquaresChat, UseDataSquaresChatOptions, DataSquaresChatBinding } from './use-chat.js'
 // The URL builders live outside the client component, so a server component or route can call them.
 export { buildChatUrl, buildEmbedUrl, buildSessionEmbedUrl, embedOrigin } from './urls.js'
 export type { ChatUrlOptions, EmbedFont, EmbedMenuLayout, EmbedUrlOptions } from './urls.js'
 export {
+  CHAT_CONTEXT_LIMITS,
   EMBED_PROTOCOL_VERSION,
   MAX_CHAT_QUESTION_CHARS,
   MAX_EMBED_TOKEN_CHARS,
@@ -17,8 +18,13 @@ export {
 } from './protocol.js'
 export type {
   AskCommand,
+  ChatContext,
+  ChatFeedbackReason,
   ChatMode,
   EmbedChatAnswerMessage,
+  EmbedChatFeedbackMessage,
+  EmbedChatFollowUpMessage,
+  SetContextCommand,
   EmbedChatLimitMessage,
   EmbedConversationChangeMessage,
   EmbedModeRequestMessage,

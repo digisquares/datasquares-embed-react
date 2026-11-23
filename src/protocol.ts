@@ -121,7 +121,10 @@ export interface EmbedTokenRequestMessage {
   reason: 'start' | 'renew'
 }
 
-/** The chat's answer is finished, as kept (`blocked`: it was withheld). */
+/**
+ * The chat's answer is finished, as kept (`blocked`: it was withheld), with the follow-up questions it offers and its
+ * number in the conversation (null when it was not kept), as a rating names it.
+ */
 export interface EmbedChatAnswerMessage {
   type: 'ds:chat-answer'
   version: typeof EMBED_PROTOCOL_VERSION
@@ -129,6 +132,31 @@ export interface EmbedChatAnswerMessage {
   question: string
   answer: string
   blocked: boolean
+  followUps?: string[]
+  answerIndex?: number | null
+}
+
+/** Why the person said an answer was not helpful. */
+export type ChatFeedbackReason = 'wrong_number' | 'wrong_scope' | 'wrong_data' | 'incomplete' | 'not_what_i_asked' | 'too_long' | 'other'
+
+/** The person rated an answer: helpful (`up`) or not (`down`, and why). `note` is what they typed, for you only. */
+export interface EmbedChatFeedbackMessage {
+  type: 'ds:chat-feedback'
+  version: typeof EMBED_PROTOCOL_VERSION
+  conversationId: string
+  answerIndex: number
+  rating: 'up' | 'down'
+  reason: ChatFeedbackReason | null
+  note: string | null
+}
+
+/** The person picked a question instead of typing it: a follow-up under an answer, or one of the suggestions. */
+export interface EmbedChatFollowUpMessage {
+  type: 'ds:chat-follow-up'
+  version: typeof EMBED_PROTOCOL_VERSION
+  conversationId: string | null
+  question: string
+  source: 'follow-up' | 'suggestion'
 }
 
 /** The chat shows another conversation (a new one: null until its first answer). */
@@ -158,6 +186,8 @@ export interface EmbedModeRequestMessage {
 }
 
 export type EmbedOutMessage =
+  | EmbedChatFeedbackMessage
+  | EmbedChatFollowUpMessage
   | EmbedReadyMessage
   | EmbedChatAnswerMessage
   | EmbedConversationChangeMessage
@@ -239,7 +269,32 @@ export interface SetModeCommand {
   exitTo?: 'inline' | 'panel'
 }
 
+/**
+ * What the person is looking at in your page, for the chat: each question carries it until the next. A hint, never
+ * access: an item outside the person's menu is ignored, and the filters only narrow what the item's cards show.
+ */
+export interface ChatContext {
+  /** The menu item the person is on: its id, as `onReady`'s items and `<DataSquaresEmbed onItemChange>` give it. */
+  itemId?: string
+  /** A card (or report block) on it, in focus. */
+  cardId?: string
+  /** The filters the person has on it, as `<DataSquaresEmbed onFilterChange>` gives them (20 at most). */
+  filters?: EmbedFilter[]
+  /** A short line about what the person is doing (300 characters at most). */
+  note?: string
+  /** The chat's name for it, on the chip above the question field (80 at most; default the menu item's name). */
+  label?: string
+}
+
+/** Tell the chat what the person is looking at (null: nothing). */
+export interface SetContextCommand {
+  type: 'ds:set-context'
+  version: typeof EMBED_PROTOCOL_VERSION
+  context: ChatContext | null
+}
+
 export type EmbedInMessage =
+  | SetContextCommand
   | SetParamsCommand
   | SetPageCommand
   | RefreshCommand
@@ -271,7 +326,14 @@ const OUT_TYPES = new Set([
   'ds:conversation-change',
   'ds:chat-limit',
   'ds:mode-request',
+  'ds:chat-feedback',
+  'ds:chat-follow-up',
 ])
+
+/** The bounds the chat holds a context to (it ignores one past them). */
+export const CHAT_CONTEXT_LIMITS = { itemId: 64, cardId: 255, note: 300, label: 80, filters: 20 } as const
+
+const FEEDBACK_REASONS: ReadonlySet<unknown> = new Set(['wrong_number', 'wrong_scope', 'wrong_data', 'incomplete', 'not_what_i_asked', 'too_long', 'other'])
 
 const MODE_REQUESTS: ReadonlySet<unknown> = new Set(['inline', 'panel', 'fullscreen', 'minimized'])
 
@@ -337,7 +399,24 @@ export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
         (msg.conversationId === null || typeof msg.conversationId === 'string') &&
         typeof msg.question === 'string' &&
         typeof msg.answer === 'string' &&
-        typeof msg.blocked === 'boolean'
+        typeof msg.blocked === 'boolean' &&
+        (msg.followUps === undefined || (Array.isArray(msg.followUps) && msg.followUps.every((f) => typeof f === 'string'))) &&
+        (msg.answerIndex === undefined || msg.answerIndex === null || (Number.isInteger(msg.answerIndex) && (msg.answerIndex as number) >= 0))
+      )
+    case 'ds:chat-feedback':
+      return (
+        typeof msg.conversationId === 'string' &&
+        Number.isInteger(msg.answerIndex) &&
+        (msg.answerIndex as number) >= 0 &&
+        (msg.rating === 'up' || msg.rating === 'down') &&
+        (msg.reason === null || FEEDBACK_REASONS.has(msg.reason)) &&
+        (msg.note === null || typeof msg.note === 'string')
+      )
+    case 'ds:chat-follow-up':
+      return (
+        (msg.conversationId === null || typeof msg.conversationId === 'string') &&
+        typeof msg.question === 'string' &&
+        (msg.source === 'follow-up' || msg.source === 'suggestion')
       )
     case 'ds:conversation-change':
       return msg.conversationId === null || typeof msg.conversationId === 'string'

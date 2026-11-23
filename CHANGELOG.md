@@ -29,6 +29,16 @@
   `ds:mode-request` from the chat; `ds:ask`, `ds:new-conversation`,
   `ds:open-conversation`, `ds:set-mode` to it; `ds:ready`'s `contentType` may
   be `chat` (the dashboard embed ignores it).
+- The chat in context: `context` (and `setContext()` on the handle and the
+  hook) tells the chat what the person is looking at — the menu item, a card,
+  their filters, a note, the chip's name (`ChatContext`, `CHAT_CONTEXT_LIMITS`;
+  what is past the bounds is left out, with a warning in development).
+  `onFeedback` hears each rating (`up`/`down`, the reason, the person's note,
+  which only you get) and `onFollowUp` each follow-up or suggestion picked;
+  `onAnswer` adds `followUps` and `answerIndex`. Protocol: `ds:set-context` to
+  the chat; `ds:chat-feedback`, `ds:chat-follow-up` from it. `/testing`:
+  `feedback()`, `followUp()`, `context`. README: What the person is looking
+  at; Follow-ups and ratings.
 - Menus: a token whose content is `{ type: 'menu' }` (or `{ type: 'menu',
   items }`, 1 to 100 content ids, for some of them) opens the embed app's menu.
   The embed draws it in the app's layout or the `menu` prop's (`sidebar`,

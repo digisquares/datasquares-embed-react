@@ -10,15 +10,27 @@
  * The hook holds the chat's mode and whether its panel is open (`bind` passes them, controlled); the person's own
  * switches in the chat reach it through `bind`'s handlers. Pass your own callbacks to the hook, not to the component
  * after `{...chat.bind}`, where they would replace the hook's.
+ *
+ * `setContext()` tells the chat what the person is looking at (with `<DataSquaresEmbed>` beside it, from its
+ * `onItemChange` and `onFilterChange`).
  */
 import { useCallback, useMemo, useRef, useState, type RefObject } from 'react'
 import type { ChatAnswer, ChatLimit, ChatReadyInfo, DataSquaresChatHandle, DataSquaresChatProps } from './DataSquaresChat.js'
 import type { EmbedError, EmbedStatus } from './frame-bridge.js'
-import type { ChatMode, EmbedMenuItem } from './protocol.js'
+import type { ChatContext, ChatMode, EmbedMenuItem } from './protocol.js'
 
 type HookCallbacks = Pick<
   DataSquaresChatProps,
-  'onReady' | 'onAnswer' | 'onConversationChange' | 'onLimitReached' | 'onError' | 'onStatusChange' | 'onModeChange' | 'onOpenChange'
+  | 'onReady'
+  | 'onAnswer'
+  | 'onConversationChange'
+  | 'onLimitReached'
+  | 'onError'
+  | 'onStatusChange'
+  | 'onModeChange'
+  | 'onOpenChange'
+  | 'onFeedback'
+  | 'onFollowUp'
 >
 
 export interface UseDataSquaresChatOptions extends HookCallbacks {
@@ -56,6 +68,8 @@ export interface UseDataSquaresChat {
   openConversation: (conversationId: string) => void
   setMode: (mode: ChatMode) => void
   setOpen: (open: boolean) => void
+  /** Tell the chat what the person is looking at (null: nothing). */
+  setContext: (context: ChatContext | null) => void
   reload: () => void
 }
 
@@ -109,6 +123,8 @@ export function useDataSquaresChat(options: UseDataSquaresChatOptions = {}): Use
         setOpenState(next)
         callbacksRef.current.onOpenChange?.(next)
       },
+      onFeedback: (feedback) => callbacksRef.current.onFeedback?.(feedback),
+      onFollowUp: (pick) => callbacksRef.current.onFollowUp?.(pick),
     }),
     [],
   )
@@ -127,6 +143,7 @@ export function useDataSquaresChat(options: UseDataSquaresChatOptions = {}): Use
     else setOpenState(next)
   }, [])
   const reload = useCallback(() => ref.current?.reload(), [])
+  const setContext = useCallback((context: ChatContext | null) => ref.current?.setContext(context), [])
 
-  return { bind, status, error, mode, open, items, conversationId, lastAnswer, limit, ask, newConversation, openConversation, setMode, setOpen, reload }
+  return { bind, status, error, mode, open, items, conversationId, lastAnswer, limit, ask, newConversation, openConversation, setMode, setOpen, setContext, reload }
 }
