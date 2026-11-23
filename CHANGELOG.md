@@ -11,6 +11,24 @@
 
 ### Added
 
+- `<DataSquaresChat>`: the DataSquares AI chat in a DataSquares frame, over what
+  the person's token names (one dashboard or report, or the embed app's menu;
+  `scope="view"` keeps a menu token's chat on one item), on the same token route
+  as the embed. Three modes on one frame, switchable live: `panel` (default: a
+  launcher and a floating panel, a bottom sheet on a phone), `inline`,
+  `fullscreen` (Exit and Esc go back), controlled (`mode`, `open`) or not
+  (`defaultMode`, `defaultOpen`). Props: `title`, `greeting`, `placeholder`,
+  `suggestions`, `conversation`, the look, `position`, `launcherLabel`,
+  `panelWidth`, `panelHeight`, `height`, `zIndex`, the fallbacks and the
+  timeout. Events: `onReady`, `onAnswer`, `onConversationChange`,
+  `onLimitReached`, `onError`, `onStatusChange`, `onModeChange`,
+  `onOpenChange`. Handle: `ask`, `newConversation`, `openConversation`,
+  `setMode`, `setOpen`, `reload`. `useDataSquaresChat()`, `buildChatUrl()`,
+  and `simulateChat()` on `/testing`. README: The AI chat.
+- Protocol: `ds:chat-answer`, `ds:conversation-change`, `ds:chat-limit`,
+  `ds:mode-request` from the chat; `ds:ask`, `ds:new-conversation`,
+  `ds:open-conversation`, `ds:set-mode` to it; `ds:ready`'s `contentType` may
+  be `chat` (the dashboard embed ignores it).
 - Menus: a token whose content is `{ type: 'menu' }` (or `{ type: 'menu',
   items }`, 1 to 100 content ids, for some of them) opens the embed app's menu.
   The embed draws it in the app's layout or the `menu` prop's (`sidebar`,

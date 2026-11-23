@@ -58,48 +58,21 @@
  * is REFUSED when a restriction is configured. The explicit attribute keeps
  * the origin (and only the origin) flowing regardless of the host's default.
  */
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   EMBED_PROTOCOL_VERSION,
-  MAX_EMBED_TOKEN_CHARS,
-  isEmbedOutMessage,
   type EmbedContentType,
-  type EmbedErrorKind,
   type EmbedFilter,
   type EmbedInMessage,
   type EmbedMenuItem,
+  type EmbedOutMessage,
   type EmbedState,
 } from './protocol.js'
 import { buildEmbedUrl, buildSessionEmbedUrl, embedOrigin as originOf, type EmbedFont, type EmbedMenuLayout } from './urls.js'
 import { DEV, isInsecureRemote, warnOnce } from './dev.js'
+import { DEFAULT_LOAD_TIMEOUT_MS, useFrameBridge, type EmbedError, type EmbedStatus } from './frame-bridge.js'
 
-/**
- * What `onError` hears: one of the embed's own kinds, or `timeout` — the frame loaded but the embed never spoke within
- * `loadTimeoutMs` (it cannot run there; see the README's troubleshooting).
- */
-export type EmbedHostErrorKind = EmbedErrorKind | 'timeout'
-
-/**
- * What `onError` hears. `cause` is set when your own `getToken` failed (it threw, or gave no usable token; `kind` is
- * then `invalid`) and on a `timeout` (an Error naming the likely reasons).
- */
-export interface EmbedError {
-  kind: EmbedHostErrorKind
-  cause?: unknown
-}
-
-/** `loading` until the embed has rendered (`ready`) or could not (`error`); a new `src` or `reload()` loads again. */
-export type EmbedStatus = 'loading' | 'ready' | 'error'
+export type { EmbedError, EmbedHostErrorKind, EmbedStatus } from './frame-bridge.js'
 
 /** What `onReady` hears. */
 export interface EmbedReadyInfo {
@@ -228,8 +201,6 @@ interface PendingState {
 /** Commands of these kinds replace a waiting one of the same kind: only the last matters to the embed. */
 const LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-params', 'ds:set-page', 'ds:refresh', 'ds:open'])
 
-const DEFAULT_LOAD_TIMEOUT_MS = 15_000
-
 let requestCounter = 0
 
 export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEmbedProps>(
@@ -262,12 +233,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       title = 'DataSquares dashboard',
     } = props
 
-    const iframeRef = useRef<HTMLIFrameElement | null>(null)
     const [reportedHeight, setReportedHeight] = useState<number | null>(null)
-    // Bumped by reload(): a new key is a new iframe, and so a new page in it.
-    const [reloadKey, setReloadKey] = useState(0)
-    const [status, setStatusState] = useState<EmbedStatus>('loading')
-    const [lastError, setLastError] = useState<EmbedError | null>(null)
     const warned = useRef(new Set<string>()).current
 
     // The one origin this component will talk to or listen for (throws, with words, on a bad baseUrl).
@@ -299,12 +265,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       [sessionMode, baseUrl, contentId, token, theme, toolbar, primaryColor, logoUrl, page, tabs, background, font, padding, item, menu, paramsKey],
     )
 
-    // The current getToken, so the message listener below binds once per origin.
-    const getTokenRef = useRef(getToken)
-    getTokenRef.current = getToken
-
-    // Callbacks live in a ref so the message listener binds once per origin,
-    // not once per render of a possibly-inline handler.
+    // Callbacks live in a ref so the frame's messages reach the latest ones, not those of the render it bound in.
     const callbacksRef = useRef<
       Pick<DataSquaresEmbedProps, 'onReady' | 'onItemChange' | 'onError' | 'onStatusChange' | 'onPageChange' | 'onPointClick' | 'onFilterChange'>
     >({})
@@ -318,191 +279,73 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
       onFilterChange: props.onFilterChange,
     }
 
-    const statusRef = useRef<EmbedStatus>('loading')
-    const setStatus = useCallback((next: EmbedStatus, error: EmbedError | null = null) => {
-      setLastError(error)
-      if (statusRef.current === next) return
-      statusRef.current = next
-      setStatusState(next)
-      callbacksRef.current.onStatusChange?.(next)
-    }, [])
-
-    /**
-     * An error, heard by the host — or, in development and with no onError, by the console. `whileReady: false` leaves a
-     * rendered embed `ready`: a renewal's getToken failing does not end a session that is still showing (the embed says
-     * `expired` itself if it ends).
-     */
-    const reportError = useCallback(
-      (error: EmbedError, whileReady = true) => {
-        if (whileReady || statusRef.current !== 'ready') setStatus('error', error)
-        const onError = callbacksRef.current.onError
-        if (onError) onError(error)
-        else if (DEV) console.warn(`[DataSquaresEmbed] the embed failed: ${error.kind}`, error.cause ?? '')
-      },
-      [setStatus],
-    )
-
     // Pending ds:get-state requests by requestId.
     const pendingStateRef = useRef(new Map<string, PendingState>())
     // The person's menu as the embed last said (empty for one item): open() checks an id against it in development.
     const itemsRef = useRef<EmbedMenuItem[] | null>(null)
 
-    // Whether the page in the frame has spoken (so its bridge listens), and the commands waiting for it to.
-    const liveRef = useRef(false)
-    const queueRef = useRef<EmbedInMessage[]>([])
-    const loadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-    const send = useCallback(
-      (msg: EmbedInMessage) => {
-        // Exact target origin: if the iframe was navigated off DataSquares,
-        // the command is dropped by the browser instead of delivered to
-        // whatever page now occupies the frame.
-        iframeRef.current?.contentWindow?.postMessage(msg, embedOrigin)
-      },
-      [embedOrigin],
-    )
-
-    const flush = useCallback(() => {
-      const waiting = queueRef.current
-      queueRef.current = []
-      for (const msg of waiting) send(msg)
-    }, [send])
-
-    // A new src (or a reload) is a new page in the frame: it must speak again before commands go out.
-    useEffect(() => {
-      liveRef.current = false
-      setStatus('loading')
-      return () => clearTimeout(loadTimerRef.current)
-    }, [src, embedOrigin, reloadKey, setStatus])
-
-    // The frame finished loading: its page now has loadTimeoutMs to speak.
-    const onFrameLoad = useCallback(() => {
-      clearTimeout(loadTimerRef.current)
-      if (liveRef.current || loadTimeoutMs <= 0) return
-      loadTimerRef.current = setTimeout(() => {
-        if (liveRef.current) return
-        reportError({
-          kind: 'timeout',
-          cause: new Error(
-            `The DataSquares embed at ${embedOrigin} loaded but did not respond within ${loadTimeoutMs} ms. Check that baseUrl is right, ` +
-              "that this page's Content-Security-Policy allows it in frame-src, that this site is on the embed's allowed domains, " +
-              'and that no referrerpolicy="no-referrer" hides this page from it.',
-          ),
-        })
-      }, loadTimeoutMs)
-    }, [embedOrigin, loadTimeoutMs, reportError])
-
-    useEffect(() => {
-      let disposed = false
-      const listener = (event: MessageEvent) => {
-        // Source first: pins WHICH window (this exact iframe — two embeds on a
-        // page must not cross), then origin pins WHO runs in it, then shape.
-        if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return
-        if (event.origin !== embedOrigin) return
-        if (!isEmbedOutMessage(event.data)) return
-
-        if (!liveRef.current) {
-          liveRef.current = true
-          clearTimeout(loadTimerRef.current)
-          flush()
-        }
-
-        const msg = event.data
-        const cb = callbacksRef.current
-        switch (msg.type) {
-          case 'ds:ready':
-            setStatus('ready')
-            itemsRef.current = msg.items ?? []
-            cb.onReady?.({
-              contentType: msg.contentType,
-              pages: msg.pages.map((p) => ({ id: p.id, name: p.name })),
-              item: msg.item ?? null,
-              items: msg.items ?? [],
-            })
-            break
-          case 'ds:item-change':
-            cb.onItemChange?.(msg.item)
-            break
-          case 'ds:resize':
-            setReportedHeight(msg.height)
-            break
-          case 'ds:error':
-            reportError({ kind: msg.kind })
-            break
-          case 'ds:page-change':
-            cb.onPageChange?.(msg.pageId)
-            break
-          case 'ds:point-click':
-            cb.onPointClick?.({ cardId: msg.cardId, value: msg.value })
-            break
-          case 'ds:filter-change':
-            cb.onFilterChange?.(msg.filters)
-            break
-          case 'ds:token-request': {
-            const ask = getTokenRef.current
-            if (!ask) break
-            const target = iframeRef.current.contentWindow
-            const fail = (cause: unknown) => {
-              if (!disposed) reportError({ kind: 'invalid', cause }, false)
+    const onMessage = (msg: EmbedOutMessage) => {
+      const cb = callbacksRef.current
+      switch (msg.type) {
+        case 'ds:ready':
+          // The chat's ready (<DataSquaresChat>) is not this component's.
+          if (msg.contentType === 'chat') break
+          itemsRef.current = msg.items ?? []
+          cb.onReady?.({
+            contentType: msg.contentType,
+            pages: msg.pages.map((p) => ({ id: p.id, name: p.name })),
+            item: msg.item ?? null,
+            items: msg.items ?? [],
+          })
+          break
+        case 'ds:item-change':
+          cb.onItemChange?.(msg.item)
+          break
+        case 'ds:resize':
+          setReportedHeight(msg.height)
+          break
+        case 'ds:page-change':
+          cb.onPageChange?.(msg.pageId)
+          break
+        case 'ds:point-click':
+          cb.onPointClick?.({ cardId: msg.cardId, value: msg.value })
+          break
+        case 'ds:filter-change':
+          cb.onFilterChange?.(msg.filters)
+          break
+        case 'ds:state': {
+          if (msg.requestId) {
+            const pending = pendingStateRef.current.get(msg.requestId)
+            if (pending) {
+              pendingStateRef.current.delete(msg.requestId)
+              clearTimeout(pending.timer)
+              pending.resolve(msg.state)
             }
-            let asked: Promise<string>
-            try {
-              asked = Promise.resolve(ask())
-            } catch (err) {
-              fail(err)
-              break
-            }
-            void asked.then((signed) => {
-              // Unmounted, or the frame now holds another origin's listener: the answer goes nowhere.
-              if (disposed) return
-              if (typeof signed !== 'string' || signed.length === 0 || signed.length > MAX_EMBED_TOKEN_CHARS) {
-                fail(new TypeError(`getToken must resolve to a signed token (1 to ${MAX_EMBED_TOKEN_CHARS} characters).`))
-                return
-              }
-              // Exact origin: a frame navigated off DataSquares never receives the person's token.
-              target?.postMessage({ type: 'ds:token', version: EMBED_PROTOCOL_VERSION, token: signed }, embedOrigin)
-            }, fail)
-            break
           }
-          case 'ds:state': {
-            if (msg.requestId) {
-              const pending = pendingStateRef.current.get(msg.requestId)
-              if (pending) {
-                pendingStateRef.current.delete(msg.requestId)
-                clearTimeout(pending.timer)
-                pending.resolve(msg.state)
-              }
-            }
-            break
-          }
+          break
         }
       }
-      window.addEventListener('message', listener)
-      return () => {
-        disposed = true
-        window.removeEventListener('message', listener)
-      }
-    }, [embedOrigin, flush, reportError, setStatus])
+    }
 
-    const post = useCallback(
-      (msg: EmbedInMessage) => {
-        if (liveRef.current) {
-          send(msg)
-          return
-        }
-        const waiting = LAST_WINS.has(msg.type) ? queueRef.current.filter((m) => m.type !== msg.type) : queueRef.current
-        queueRef.current = [...waiting, msg]
-      },
-      [send],
-    )
+    const bridge = useFrameBridge({
+      embedOrigin,
+      src,
+      getToken,
+      loadTimeoutMs,
+      lastWins: LAST_WINS,
+      name: 'DataSquaresEmbed',
+      onMessage,
+      // With no onError of the host's, the bridge writes a failure to the console in development.
+      onError: props.onError ? (error) => callbacksRef.current.onError?.(error) : undefined,
+      onStatusChange: (next) => callbacksRef.current.onStatusChange?.(next),
+    })
+    const { iframeRef, reloadKey, status, lastError, post, dropWaiting, onFrameLoad } = bridge
 
     const reload = useCallback(() => {
-      liveRef.current = false
       itemsRef.current = null
-      clearTimeout(loadTimerRef.current)
       setReportedHeight(null)
-      setReloadKey((k) => k + 1)
-    }, [])
+      bridge.reload()
+    }, [bridge.reload])
 
     useImperativeHandle(
       ref,
@@ -534,7 +377,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
           return new Promise<EmbedState>((resolve, reject) => {
             const timer = setTimeout(() => {
               if (pendingStateRef.current.delete(requestId)) {
-                queueRef.current = queueRef.current.filter((m) => !(m.type === 'ds:get-state' && m.requestId === requestId))
+                dropWaiting((m) => !(m.type === 'ds:get-state' && m.requestId === requestId))
                 reject(new Error('DataSquares embed did not answer ds:get-state — is it loaded and same-version?'))
               }
             }, timeoutMs)
@@ -543,7 +386,7 @@ export const DataSquaresEmbed = forwardRef<DataSquaresEmbedHandle, DataSquaresEm
           })
         },
       }),
-      [post, reload, warned],
+      [post, reload, warned, dropWaiting, iframeRef],
     )
 
     const frame = (

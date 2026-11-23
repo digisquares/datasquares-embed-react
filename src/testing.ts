@@ -165,3 +165,47 @@ export function simulateEmbed(target: HTMLIFrameElement | ParentNode, options: S
     send,
   }
 }
+
+export interface ChatSimulator {
+  /** Every command the component sent to the chat, oldest first (`ds:token` answers included). */
+  readonly commands: EmbedInMessage[]
+  /** The tokens the component answered token requests with, oldest first. */
+  readonly tokens: string[]
+  /** The chat is ready to answer; with a menu token, pass the menu it asks about. */
+  ready(info?: { items?: EmbedMenuItem[] }): void
+  /** An answer is finished. */
+  answer(answer: { question: string; answer: string; conversationId?: string | null; blocked?: boolean }): void
+  /** The chat shows another conversation. */
+  conversationChange(conversationId: string | null): void
+  /** A budget or an hourly limit stopped a question. */
+  limit(limit: { code: 'EMBED_AI_BUDGET_REACHED' | 'EMBED_AI_RATE_LIMITED'; scope?: 'person' | 'tenant' | null; message: string }): void
+  /** The person asked, in the chat's own controls, to show it another way. */
+  requestMode(mode: 'inline' | 'panel' | 'fullscreen' | 'minimized'): void
+  /** The chat could not start. */
+  error(kind: EmbedErrorKind): void
+  /** The chat asks for a signed token; resolves with the one the component answered. */
+  requestToken(reason?: 'start' | 'renew', timeoutMs?: number): Promise<string>
+  /** Send any message as the chat. */
+  send(message: EmbedOutMessage | Record<string, unknown>): void
+}
+
+/**
+ * Stand in for the AI chat inside `target` (the `<DataSquaresChat>` iframe, or a container holding it). In `panel` mode
+ * the frame mounts when the panel first opens: open it, then call this.
+ */
+export function simulateChat(target: HTMLIFrameElement | ParentNode, options: Omit<SimulateEmbedOptions, 'state'> = {}): ChatSimulator {
+  const embed = simulateEmbed(target, options)
+  const v = EMBED_PROTOCOL_VERSION
+  return {
+    commands: embed.commands,
+    tokens: embed.tokens,
+    ready: (info = {}) => embed.send({ type: 'ds:ready', version: v, contentType: 'chat', pages: [], item: null, items: info.items ?? [] }),
+    answer: (a) => embed.send({ type: 'ds:chat-answer', version: v, question: a.question, answer: a.answer, conversationId: a.conversationId ?? null, blocked: a.blocked ?? false }),
+    conversationChange: (conversationId) => embed.send({ type: 'ds:conversation-change', version: v, conversationId }),
+    limit: (l) => embed.send({ type: 'ds:chat-limit', version: v, code: l.code, scope: l.scope ?? null, message: l.message }),
+    requestMode: (mode) => embed.send({ type: 'ds:mode-request', version: v, mode }),
+    error: embed.error,
+    requestToken: embed.requestToken,
+    send: embed.send,
+  }
+}

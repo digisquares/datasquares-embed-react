@@ -1,10 +1,11 @@
 # @digisquares/datasquares-react
 
-React SDK for embedding DataSquares dashboards, reports and presentations — one
-of them, or a menu of them in the embed app's look: the `<DataSquaresEmbed>`
-component and the `useDataSquaresEmbed()` hook, typed events, host-side
-controls, loading and error display, a token route for your server in three
-lines, and a stand-in embed for your tests.
+React SDK for DataSquares in your own app: dashboards, reports and
+presentations — one of them, or a menu of them in the embed app's look — with
+`<DataSquaresEmbed>`, and the DataSquares AI chat over them with
+`<DataSquaresChat>`. Typed events, host-side controls, loading and error
+display, hooks, a token route for your server in three lines, and stand-ins for
+your tests.
 
 ## Install
 
@@ -306,6 +307,84 @@ In development, the component also warns in the console when `getToken` and
 `token` are both set, when `baseUrl` is plain http to another machine, and
 when the embed fails with no `onError` to hear it. Production builds (where
 your bundler sets `NODE_ENV=production`) stay silent.
+
+## The AI chat: `<DataSquaresChat>`
+
+The DataSquares AI chat, in a DataSquares frame: answers stream as they are
+written, with progress lines, tables and charts drawn from the cards' own rows,
+and each person's earlier conversations. It answers from what the person's
+token names, under their row rules: one dashboard or report, or the embed app's
+menu — every dashboard and report of the person's menu. It uses the same token
+route as `<DataSquaresEmbed>`; the token's `role` must be `viewer_ai`, and the
+embed app's Ask AI on (Administration → Settings → Embedding). Questions spend
+the app's AI credits, within its monthly budgets and hourly limits.
+
+```tsx
+import { DataSquaresChat } from '@digisquares/datasquares-react'
+
+<DataSquaresChat
+  baseUrl="https://app.datasquares.ai"
+  getToken={() => fetch('/api/datasquares-token').then((r) => r.text())}
+  suggestions={['How did sales do this month?', 'Which region is behind?']}
+/>
+```
+
+It shows three ways, switchable at any time on the same frame (a conversation
+carries on across a switch):
+
+| `mode` | |
+|---|---|
+| `panel` (default) | A launcher button in a corner (`position`, `launcherLabel`, your `primaryColor`) opens a floating panel (`panelWidth` × `panelHeight`); on a phone-narrow window, a sheet from the bottom. The chat's Minimize folds it back. |
+| `inline` | It fills a box of your page (`height`). |
+| `fullscreen` | It covers the window; the chat's Exit and Esc go back to the mode it came from. |
+
+Pass `mode` and `open` to control them (with `onModeChange` and
+`onOpenChange`, which also hear the person's own switches in the chat), or
+`defaultMode` and `defaultOpen`. In `panel` mode the frame loads when the panel
+first opens.
+
+| Prop | |
+|---|---|
+| `scope` | A menu token: `view` keeps the chat on the item the session opens (`item`); default the whole menu. |
+| `title`, `greeting`, `placeholder` | The chat's heading (default "Ask AI"), what it says before the first question, the question field's placeholder. |
+| `suggestions` | Up to four questions to start with (default: questions about the menu's first items). |
+| `conversation` | One of the person's earlier conversations to open first (its id, from `onConversationChange`). |
+| `theme`, `primaryColor`, `logoUrl`, `background`, `font` | The look, as on the embed; each wins over the app's. The *Powered by DataSquares* credit always shows. |
+| `loadTimeoutMs`, `loadingFallback`, `errorFallback`, `frameTitle`, `zIndex` | As on the embed. |
+
+| Event | Fires when |
+|---|---|
+| `onReady` | the chat can answer; with a menu token, `items` is the menu it asks about |
+| `onAnswer` | an answer is finished: `{ question, answer, conversationId, blocked }` (`blocked`: it was withheld) |
+| `onConversationChange` | another conversation shows (a new one: `null` until its first answer) |
+| `onLimitReached` | a monthly budget or an hourly limit stopped a question: `{ code, scope, message }` (`scope`: `person` or `tenant`); the chat says so in its own words |
+| `onError` | it could not start (`forbidden` includes a token without Ask AI), never spoke (`timeout`), or `getToken` failed |
+| `onStatusChange`, `onModeChange`, `onOpenChange` | the status, the mode, the panel opened or folded |
+
+```tsx
+const chat = useRef<DataSquaresChatHandle>(null)
+chat.current?.ask('Why did margin drop?')   // a folded panel opens; waits until the chat listens
+chat.current?.newConversation()
+chat.current?.openConversation(id)
+chat.current?.setMode('fullscreen')
+chat.current?.setOpen(false)
+chat.current?.reload()
+```
+
+`useDataSquaresChat()` holds the mode and the panel's state for you and gives
+`status`, `error`, `mode`, `open`, `items`, `conversationId`, `lastAnswer`,
+`limit` and the commands; spread its `bind` on the component:
+
+```tsx
+const chat = useDataSquaresChat({ defaultMode: 'panel' })
+<button onClick={() => chat.ask('How did sales do this month?')}>Ask about sales</button>
+<DataSquaresChat {...chat.bind} baseUrl="https://app.datasquares.ai" getToken={getToken} />
+```
+
+In your tests, `simulateChat(iframe)` from `/testing` speaks as the chat:
+`ready({ items })`, `answer(…)`, `conversationChange(id)`, `limit(…)`,
+`requestMode(mode)`, `error(kind)`, `requestToken()`, and `commands` to assert
+on. In `panel` mode, open the panel first: the frame mounts then.
 
 ## Troubleshooting: `timeout`
 

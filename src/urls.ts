@@ -84,3 +84,53 @@ export function buildEmbedUrl(opts: EmbedUrlOptions & { contentId: string; token
   url.search = query.toString()
   return url.toString()
 }
+
+/** The chat's options (<DataSquaresChat>). Each look option wins over the embed app's look, as on the embed. */
+export interface ChatUrlOptions {
+  baseUrl: string
+  /** `light`, `dark`, or `auto` (follows the viewer's system). */
+  theme?: string
+  primaryColor?: string
+  logoUrl?: string
+  /** `default`, `transparent` (your page shows through), or a colour as hex. */
+  background?: string
+  font?: EmbedFont
+  /** A menu token: `view` keeps the chat on the item the session opens (`item`); default the whole menu. */
+  scope?: 'view' | 'menu'
+  /** A menu token: the item the session opens (its content id). */
+  item?: string
+  /** The chat's heading (default "Ask AI"). */
+  title?: string
+  /** What the empty chat says. */
+  greeting?: string
+  /** The question field's placeholder. */
+  placeholder?: string
+  /** Up to four questions to start with. */
+  suggestions?: readonly string[]
+  /** One of the person's earlier conversations to open (its id). */
+  conversation?: string
+}
+
+/**
+ * The AI chat's URL (`/embed/chat`). Like the session embed's, it carries no token: the person's signed token is handed
+ * over by postMessage when the chat asks for it.
+ */
+export function buildChatUrl(opts: ChatUrlOptions): string {
+  const url = new URL('/embed/chat', embedOrigin(opts.baseUrl))
+  const set = (key: string, value: string | undefined) => {
+    if (value) url.searchParams.set(key, value)
+  }
+  set('theme', opts.theme)
+  set('primaryColor', opts.primaryColor)
+  set('logoUrl', opts.logoUrl)
+  set('background', opts.background)
+  set('font', opts.font)
+  set('scope', opts.scope)
+  set('item', opts.item)
+  set('title', opts.title)
+  set('greeting', opts.greeting)
+  set('placeholder', opts.placeholder)
+  for (const s of (opts.suggestions ?? []).slice(0, 4)) if (s.trim()) url.searchParams.append('suggestion', s)
+  set('conversation', opts.conversation)
+  return url.toString()
+}
