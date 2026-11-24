@@ -125,6 +125,69 @@ describe('<datasquares-chat>', () => {
     expect(sim.commands.slice(-2)).toEqual([{ type: 'ds:new-conversation', version: 1 }, { type: 'ds:open-conversation', version: 1, conversationId: 'c-1' }])
   })
 
+  it('a getToken and a context the page set before the element upgraded are kept (review)', async () => {
+    // An element made where custom elements don't run (a template's document) is plain until it joins the page.
+    const early = document.createElement('template').content.ownerDocument.createElement('datasquares-chat') as DataSquaresChatElement
+    early.setAttribute('base-url', BASE)
+    early.setAttribute('mode', 'inline')
+    const plain = early as unknown as Record<string, unknown>
+    plain.getToken = () => Promise.resolve('set.early')
+    plain.context = { itemId: ITEM.id }
+    document.body.append(document.adoptNode(early))
+    expect(early).toBeInstanceOf(DataSquaresChatElement)
+    const sim = simulateChat(frameOf(early)!, { act: now })
+    await expect(sim.requestToken()).resolves.toBe('set.early')
+    sim.ready()
+    expect(sim.context).toEqual({ itemId: ITEM.id })
+    expect(early.context).toEqual({ itemId: ITEM.id })
+  })
+
+  it('a command sent before the chat was ever shown, or before the element joined the page, waits for it (review)', () => {
+    const folded = chat()
+    folded.openConversation('c-1')
+    expect(frameOf(folded)).toBeNull()
+    folded.setOpen(true)
+    const sim = simulateChat(frameOf(folded)!, { act: now })
+    sim.ready()
+    expect(sim.commands).toContainEqual({ type: 'ds:open-conversation', version: 1, conversationId: 'c-1' })
+
+    const detached = document.createElement('datasquares-chat')
+    detached.setAttribute('base-url', BASE)
+    detached.setAttribute('mode', 'inline')
+    detached.newConversation()
+    document.body.append(detached)
+    const later = simulateChat(frameOf(detached)!, { act: now })
+    later.ready()
+    expect(later.commands).toContainEqual({ type: 'ds:new-conversation', version: 1 })
+  })
+
+  it('moved in the page, its new frame hears the mode and the context again (review)', () => {
+    const el = chat({ mode: 'inline' })
+    el.context = { itemId: ITEM.id }
+    simulateChat(frameOf(el)!, { act: now }).ready()
+    el.remove()
+    document.body.append(el)
+    const sim = simulateChat(frameOf(el)!, { act: now })
+    sim.ready()
+    expect(sim.commands).toContainEqual({ type: 'ds:set-mode', version: 1, mode: 'inline' })
+    expect(sim.context).toEqual({ itemId: ITEM.id })
+  })
+
+  it('a base-url on another origin starts a new frame that hears that origin (review)', async () => {
+    const el = chat({ mode: 'inline' })
+    el.getToken = () => Promise.resolve('signed.person.token')
+    const first = frameOf(el)!
+    el.setAttribute('base-url', 'https://eu.datasquares.ai')
+    const frame = frameOf(el)!
+    expect(frame).not.toBe(first)
+    expect(first.isConnected).toBe(false)
+    expect(new URL(frame.src).origin).toBe('https://eu.datasquares.ai')
+    const sim = simulateChat(frame, { act: now })
+    await expect(sim.requestToken()).resolves.toBe('signed.person.token')
+    sim.ready()
+    expect(sim.commands).toContainEqual({ type: 'ds:set-mode', version: 1, mode: 'inline' })
+  })
+
   it('tells the chat what the person is looking at, within its bounds, and again after a reload', () => {
     const el = chat({ mode: 'inline' })
     el.context = { itemId: ITEM.id, filters: [{ fieldId: 'orders.region', operator: 'eq', value: 'West' }, { fieldId: '', operator: 'eq' }], note: 'x'.repeat(301) }

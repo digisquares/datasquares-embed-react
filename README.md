@@ -417,7 +417,10 @@ from what the answer read (no extra AI call). Each answer kept in the person's
 conversation can be rated helpful or not, with a reason; the person may add a
 note. DataSquares keeps the rating and the reason (they appear, counted, on
 Administration → Usage); the note goes to `onFeedback` only, so you can send it
-to your own support or product tools.
+to your own support or product tools. `onFeedback` fires each time a rating
+changes (*not helpful*, then its reason, are two calls for the same answer):
+key what you keep by `conversationId` and `answerIndex`, and let the latest
+stand.
 
 `useDataSquaresChat()` holds the mode and the panel's state for you and gives
 `status`, `error`, `mode`, `open`, `items`, `conversationId`, `lastAnswer`,

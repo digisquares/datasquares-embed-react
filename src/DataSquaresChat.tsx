@@ -66,6 +66,10 @@ export interface ChatAnswer {
 }
 
 /** The person rated an answer. */
+/**
+ * The person rated an answer. One event each time the rating changes: *not helpful* and then its reason arrive as two
+ * events for the same answer, so key them by `conversationId` and `answerIndex` (the latest stands).
+ */
 export interface ChatFeedback {
   conversationId: string
   answerIndex: number
@@ -302,12 +306,14 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
     setOwnOpen(next)
     callbacks.current.onOpenChange?.(next)
   }, [])
-  // Full screen's way back: the mode it was entered from.
+  // Full screen's way back: the mode it was entered from, whoever switched (the person, or a host controlling `mode`).
   const [exitTo, setExitTo] = useState<'inline' | 'panel'>(defaultMode === 'inline' ? 'inline' : 'panel')
+  useEffect(() => {
+    if (mode !== 'fullscreen') setExitTo(mode)
+  }, [mode])
   const goTo = useCallback(
     (next: ChatMode) => {
       if (next === mode) return
-      if (next === 'fullscreen') setExitTo(mode === 'inline' ? 'inline' : 'panel')
       if (next === 'panel' && !open) changeOpen(true)
       changeMode(next)
     },

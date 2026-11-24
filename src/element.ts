@@ -62,9 +62,16 @@ const intOf = (v: string | null, fallback: number) => {
 
 /** What the frames have in common: the base URL, the token, the channel, the iframe, the events. */
 abstract class FrameElement extends ElementBase {
-  /** Your function for the person's signed token (instead of `token-url`). */
-  getToken?: () => Promise<string>
+  /**
+   * Your function for the person's signed token (instead of `token-url`). Declared, never a class field: a field would
+   * wipe a function your page set before the element upgraded (the module script runs after inline scripts).
+   */
+  declare getToken?: () => Promise<string>
   protected channel: FrameChannel | null = null
+  /** The origin the channel is pinned to: a new `base-url` origin makes a new channel and frame. */
+  private channelOrigin: string | null = null
+  /** Commands sent before there is a channel (the frame not made yet, or the element not connected): sent once it is. */
+  private pending: EmbedInMessage[] = []
   protected iframe: HTMLIFrameElement | null = null
   protected root!: ShadowRoot
   protected src = ''
@@ -89,6 +96,20 @@ abstract class FrameElement extends ElementBase {
     return this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable }))
   }
 
+  /**
+   * Properties your page set before the element upgraded sit on the element itself and hide the class's setters: take
+   * each off and set it again, so the setter runs (the custom-elements "lazy property" pattern).
+   */
+  protected upgradeProperties(names: readonly string[]): void {
+    for (const name of names) {
+      if (!Object.prototype.hasOwnProperty.call(this, name)) continue
+      const self = this as unknown as Record<string, unknown>
+      const value = self[name]
+      delete self[name]
+      self[name] = value
+    }
+  }
+
   protected tokenSource(): (() => Promise<string>) | undefined {
     if (this.getToken) return () => this.getToken!()
     const url = this.getAttribute('token-url')
@@ -104,7 +125,16 @@ abstract class FrameElement extends ElementBase {
       console.error(`[${this.elementName}] ${(err as Error).message.replace('DataSquaresEmbed: baseUrl', 'base-url')}`)
       return null
     }
+    // A `base-url` on another origin: the channel only hears its own origin, so the frame starts again with a new one.
+    if (this.channel && this.channelOrigin !== origin) {
+      this.channel.dispose()
+      this.channel = null
+      this.iframe?.remove()
+      this.iframe = null
+      this.src = ''
+    }
     if (!this.channel) {
+      this.channelOrigin = origin
       this.channel = new FrameChannel({
         embedOrigin: origin,
         getToken: () => {
@@ -119,6 +149,10 @@ abstract class FrameElement extends ElementBase {
         onError: (error) => this.emit('ds-error', error),
         onStatusChange: (status) => this.emit('ds-status-change', { status }),
       })
+      // What was sent before the channel: it waits in the channel's queue until the frame listens.
+      const held = this.pending
+      this.pending = []
+      for (const msg of held) this.channel.post(msg)
     }
     if (!this.iframe) {
       const iframe = document.createElement('iframe')
@@ -151,8 +185,14 @@ abstract class FrameElement extends ElementBase {
     this.iframe.src = src
   }
 
+  /** Send a command; before there is a channel it is held (only the last of a kind the frame keeps last), and sent then. */
   protected post(msg: EmbedInMessage): void {
-    this.channel?.post(msg)
+    if (this.channel) {
+      this.channel.post(msg)
+      return
+    }
+    if (this.lastWins.has(msg.type)) this.pending = this.pending.filter((m) => m.type !== msg.type)
+    this.pending.push(msg)
   }
 
   protected abstract defaultFrameTitle(): string
@@ -160,6 +200,7 @@ abstract class FrameElement extends ElementBase {
   disconnectedCallback(): void {
     this.channel?.dispose()
     this.channel = null
+    this.channelOrigin = null
     this.iframe = null
     this.src = ''
   }
@@ -282,6 +323,7 @@ export class DataSquaresChatElement extends FrameElement {
   }
 
   connectedCallback(): void {
+    this.upgradeProperties(['getToken', 'context', 'mode', 'open'])
     if (typeof window.matchMedia === 'function') {
       this.narrow = window.matchMedia('(max-width: 640px)')
       this.narrow.addEventListener?.('change', this.onNarrow)
@@ -302,6 +344,8 @@ export class DataSquaresChatElement extends FrameElement {
     super.disconnectedCallback()
     this.box?.replaceChildren()
     this.shownMode = null
+    // A frame made after the element moves is a new page: it hears the mode and the context again.
+    this.lastSrc = ''
   }
 
   attributeChangedCallback(name: string, before: string | null, after: string | null): void {
@@ -589,6 +633,7 @@ export class DataSquaresEmbedElement extends FrameElement {
   }
 
   connectedCallback(): void {
+    this.upgradeProperties(['getToken'])
     this.render()
   }
 

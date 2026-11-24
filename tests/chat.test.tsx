@@ -145,6 +145,17 @@ describe('the three modes on one frame', () => {
     chat.requestMode('inline')
     expect(frame().closest('[data-ds-chat-mode]')!.getAttribute('data-ds-chat-mode')).toBe('inline')
   })
+
+  it('a host controlling mode itself: full screen entered from inline goes back to inline (review)', () => {
+    const onModeChange = vi.fn()
+    const { rerender } = render(<DataSquaresChat baseUrl={BASE} getToken={getToken} mode="inline" onModeChange={onModeChange} />)
+    const chat = simulateChat(frame())
+    chat.ready()
+    rerender(<DataSquaresChat baseUrl={BASE} getToken={getToken} mode="fullscreen" onModeChange={onModeChange} />)
+    expect(chat.commands).toContainEqual({ type: 'ds:set-mode', version: 1, mode: 'fullscreen', exitTo: 'inline' })
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onModeChange).toHaveBeenLastCalledWith('inline')
+  })
 })
 
 describe('what the person is looking at', () => {
