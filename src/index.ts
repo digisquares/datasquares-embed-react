@@ -3,7 +3,7 @@ export type { DataSquaresEmbedProps, DataSquaresEmbedHandle, EmbedError, EmbedHo
 export { useDataSquaresEmbed } from './use-embed.js'
 export type { UseDataSquaresEmbed, DataSquaresEmbedBinding } from './use-embed.js'
 export { DataSquaresChat } from './DataSquaresChat.js'
-export type { DataSquaresChatProps, DataSquaresChatHandle, ChatAnswer, ChatFeedback, ChatFollowUp, ChatLimit, ChatReadyInfo } from './DataSquaresChat.js'
+export type { DataSquaresChatProps, DataSquaresChatHandle, ChatAnswer, ChatFeedback, ChatSaved, ChatFollowUp, ChatLimit, ChatReadyInfo } from './DataSquaresChat.js'
 export { useDataSquaresChat } from './use-chat.js'
 export type { UseDataSquaresChat, UseDataSquaresChatOptions, DataSquaresChatBinding } from './use-chat.js'
 // The URL builders live outside the client component, so a server component or route can call them.
@@ -27,6 +27,7 @@ export type {
   ChatMode,
   EmbedChatAnswerMessage,
   EmbedChatFeedbackMessage,
+  EmbedChatSavedMessage,
   EmbedChatFollowUpMessage,
   SetContextCommand,
   EmbedChatLimitMessage,

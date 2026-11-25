@@ -30,6 +30,7 @@ type HookCallbacks = Pick<
   | 'onModeChange'
   | 'onOpenChange'
   | 'onFeedback'
+  | 'onSaved'
   | 'onFollowUp'
 >
 
@@ -124,6 +125,7 @@ export function useDataSquaresChat(options: UseDataSquaresChatOptions = {}): Use
         callbacksRef.current.onOpenChange?.(next)
       },
       onFeedback: (feedback) => callbacksRef.current.onFeedback?.(feedback),
+      onSaved: (saved) => callbacksRef.current.onSaved?.(saved),
       onFollowUp: (pick) => callbacksRef.current.onFollowUp?.(pick),
     }),
     [],

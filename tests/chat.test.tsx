@@ -269,6 +269,14 @@ describe('what the person is looking at', () => {
 })
 
 describe('the chat\'s events', () => {
+  it('0.5: hears a chart or a table added to a dashboard', () => {
+    const onSaved = vi.fn()
+    render(<DataSquaresChat baseUrl={BASE} getToken={getToken} defaultMode="inline" onSaved={onSaved} />)
+    const chat = simulateChat(frame())
+    chat.saved({ conversationId: 'c-1', answerIndex: 2, title: 'Revenue by region', dashboardId: 'd-1', dashboardName: 'Sales overview' })
+    expect(onSaved).toHaveBeenCalledWith({ conversationId: 'c-1', answerIndex: 2, title: 'Revenue by region', dashboardId: 'd-1', dashboardName: 'Sales overview' })
+  })
+
   it('phase 2: a rating, a follow-up or suggestion picked, and the follow-ups an answer offers', () => {
     const onFeedback = vi.fn()
     const onFollowUp = vi.fn()
@@ -366,6 +374,15 @@ describe('the guard over the chat\'s messages', () => {
     expect(isEmbedOutMessage({ type: 'ds:chat-answer', version: 1, conversationId: null, question: 'q', answer: 'a' })).toBe(false)
     expect(isEmbedOutMessage({ type: 'ds:chat-limit', version: 1, code: 'X', scope: 'everyone', message: 'm' })).toBe(false)
     expect(isEmbedOutMessage({ type: 'ds:mode-request', version: 1, mode: 'huge' })).toBe(false)
+  })
+
+  it('0.5: passes a chart added to a dashboard, and refuses its wrong shapes', () => {
+    const saved = { type: 'ds:chat-saved', version: 1, conversationId: 'c', answerIndex: 0, title: 'Revenue by region', dashboardId: 'd-1', dashboardName: 'Sales' }
+    expect(isEmbedOutMessage(saved)).toBe(true)
+    expect(isEmbedOutMessage({ ...saved, answerIndex: -1 })).toBe(false)
+    expect(isEmbedOutMessage({ ...saved, dashboardId: '' })).toBe(false)
+    expect(isEmbedOutMessage({ ...saved, dashboardName: 7 })).toBe(false)
+    expect(isEmbedOutMessage({ ...saved, title: undefined })).toBe(false)
   })
 
   it('phase 2: passes ratings, picks and an answer\'s follow-ups, and refuses their wrong shapes', () => {

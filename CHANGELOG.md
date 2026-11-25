@@ -25,6 +25,12 @@
   charts and 3 tables; 50 labels a chart; 12 columns and 200 rows a table; what
   is cut short is `truncated`). Protocol: `ds:chat-answer` may carry `charts`
   and `tables`; still version 1. `/testing`: `answer({ charts, tables })`.
+- A chart or a table added to a dashboard: in a chat for people of your own
+  company, where the embed app allows it, a person can add what an answer drew
+  to a dashboard they may edit. `onSaved` (and `ds-saved`) hears it:
+  `{ conversationId, answerIndex, title, dashboardId, dashboardName }`
+  (`ChatSaved`). Protocol: `ds:chat-saved`. A customer's chat and the
+  standalone analyst never offer it.
 
 ## 0.4.0
 

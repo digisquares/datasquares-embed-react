@@ -183,6 +183,21 @@ export interface EmbedChatFeedbackMessage {
   note: string | null
 }
 
+/**
+ * The person added a chart or a table of an answer to a dashboard of theirs. Only in a chat for people of your own
+ * company, where the embed app allows it; a customer's chat and the standalone analyst never offer it.
+ */
+export interface EmbedChatSavedMessage {
+  type: 'ds:chat-saved'
+  version: typeof EMBED_PROTOCOL_VERSION
+  conversationId: string
+  answerIndex: number
+  /** The chart's or the table's title: the new card's name. */
+  title: string
+  dashboardId: string
+  dashboardName: string
+}
+
 /** The person picked a question instead of typing it: a follow-up under an answer, or one of the suggestions. */
 export interface EmbedChatFollowUpMessage {
   type: 'ds:chat-follow-up'
@@ -220,6 +235,7 @@ export interface EmbedModeRequestMessage {
 
 export type EmbedOutMessage =
   | EmbedChatFeedbackMessage
+  | EmbedChatSavedMessage
   | EmbedChatFollowUpMessage
   | EmbedReadyMessage
   | EmbedChatAnswerMessage
@@ -360,6 +376,7 @@ const OUT_TYPES = new Set([
   'ds:chat-limit',
   'ds:mode-request',
   'ds:chat-feedback',
+  'ds:chat-saved',
   'ds:chat-follow-up',
 ])
 
@@ -531,6 +548,16 @@ export function isEmbedOutMessage(data: unknown): data is EmbedOutMessage {
         typeof msg.blocked === 'boolean' &&
         (msg.followUps === undefined || (Array.isArray(msg.followUps) && msg.followUps.every((f) => typeof f === 'string'))) &&
         (msg.answerIndex === undefined || msg.answerIndex === null || (Number.isInteger(msg.answerIndex) && (msg.answerIndex as number) >= 0))
+      )
+    case 'ds:chat-saved':
+      return (
+        typeof msg.conversationId === 'string' &&
+        Number.isInteger(msg.answerIndex) &&
+        (msg.answerIndex as number) >= 0 &&
+        typeof msg.title === 'string' &&
+        typeof msg.dashboardId === 'string' &&
+        msg.dashboardId.length > 0 &&
+        typeof msg.dashboardName === 'string'
       )
     case 'ds:chat-feedback':
       return (
