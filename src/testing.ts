@@ -190,6 +190,8 @@ export interface ChatSimulator {
   }): void
   /** The person rated an answer. */
   feedback(feedback: { conversationId: string; answerIndex?: number; rating: 'up' | 'down'; reason?: ChatFeedbackReason | null; note?: string | null }): void
+  /** The person added a chart or a table of an answer to a dashboard of theirs. */
+  saved(saved: { conversationId: string; answerIndex?: number; title: string; dashboardId: string; dashboardName: string }): void
   /** The person picked a follow-up under an answer, or a suggestion. */
   followUp(pick: { question: string; conversationId?: string | null; source?: 'follow-up' | 'suggestion' }): void
   /** The latest context the component told the chat (`ds:set-context`), undefined when none. */
@@ -235,6 +237,8 @@ export function simulateChat(target: HTMLIFrameElement | ParentNode, options: Om
       }),
     feedback: (f) =>
       embed.send({ type: 'ds:chat-feedback', version: v, conversationId: f.conversationId, answerIndex: f.answerIndex ?? 0, rating: f.rating, reason: f.reason ?? null, note: f.note ?? null }),
+    saved: (s) =>
+      embed.send({ type: 'ds:chat-saved', version: v, conversationId: s.conversationId, answerIndex: s.answerIndex ?? 0, title: s.title, dashboardId: s.dashboardId, dashboardName: s.dashboardName }),
     followUp: (p) => embed.send({ type: 'ds:chat-follow-up', version: v, conversationId: p.conversationId ?? null, question: p.question, source: p.source ?? 'follow-up' }),
     get context() {
       const last = [...embed.commands].reverse().find((c) => c.type === 'ds:set-context')

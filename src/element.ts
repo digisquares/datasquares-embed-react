@@ -252,7 +252,7 @@ function boundedContext(c: ChatContext | null | undefined): ChatContext | null {
  * `background`, `font`, `launcher-label`, `position` (`bottom-right`, `bottom-left`), `panel-width`, `panel-height`,
  * `height` (inline), `z-index`, `load-timeout`, `frame-title`, `follows` (a `<datasquares-embed>`'s id). Properties:
  * `getToken`, `context`, `standalone`, `status`, `error`. Methods: `ask`, `newConversation`, `openConversation`, `setMode`, `setOpen`, `setContext`, `reload`. Events:
- * `ds-ready`, `ds-answer`, `ds-feedback`, `ds-follow-up`, `ds-conversation-change`, `ds-limit`, `ds-mode-change`
+ * `ds-ready`, `ds-answer`, `ds-feedback`, `ds-saved`, `ds-follow-up`, `ds-conversation-change`, `ds-limit`, `ds-mode-change`
  * (cancelable when the person switched in the chat: the switch is undone), `ds-open-change`, `ds-error`,
  * `ds-status-change`.
  */
@@ -453,6 +453,9 @@ export class DataSquaresChatElement extends FrameElement {
       }
       case 'ds:chat-feedback':
         this.emit('ds-feedback', { conversationId: msg.conversationId, answerIndex: msg.answerIndex, rating: msg.rating, reason: msg.reason, note: msg.note })
+        break
+      case 'ds:chat-saved':
+        this.emit('ds-saved', { conversationId: msg.conversationId, answerIndex: msg.answerIndex, title: msg.title, dashboardId: msg.dashboardId, dashboardName: msg.dashboardName })
         break
       case 'ds:chat-follow-up':
         this.emit('ds-follow-up', { conversationId: msg.conversationId, question: msg.question, source: msg.source })

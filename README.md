@@ -364,6 +364,7 @@ first opens.
 | `onReady` | the chat can answer; with a menu token, `items` is the menu it asks about |
 | `onAnswer` | an answer is finished: `{ question, answer, conversationId, blocked, followUps, answerIndex, charts?, tables? }` (`blocked`: it was withheld; `followUps`: the questions it offers next; `answerIndex`: its number in the conversation; `charts` and `tables`: what it showed, as data, [below](#what-an-answer-showed-charts-and-tables)) |
 | `onFeedback` | the person rated an answer: `{ conversationId, answerIndex, rating, reason, note }` (`rating`: `up` or `down`; `reason` for a `down`; `note`: what they typed, which only you get) |
+| `onSaved` | the person added a chart or a table of an answer to a dashboard of theirs: `{ conversationId, answerIndex, title, dashboardId, dashboardName }`. Only in a chat for people of your own company, where the embed app allows it; a customer's chat and the standalone analyst never offer it |
 | `onFollowUp` | the person picked a question instead of typing it: `{ conversationId, question, source }` (`source`: `follow-up` under an answer, or `suggestion`) |
 | `onConversationChange` | another conversation shows (a new one: `null` until its first answer) |
 | `onLimitReached` | a monthly budget or an hourly limit stopped a question: `{ code, scope, message }` (`scope`: `person` or `tenant`); the chat says so in its own words |
@@ -570,7 +571,7 @@ Methods: `ask(question)`, `newConversation()`, `openConversation(id)`,
 property), `reload()`. Properties: `status`, `error`.
 
 Events (each a bubbling `CustomEvent` whose `detail` is what the React callback
-gets): `ds-ready`, `ds-answer`, `ds-feedback`, `ds-follow-up`,
+gets): `ds-ready`, `ds-answer`, `ds-feedback`, `ds-saved`, `ds-follow-up`,
 `ds-conversation-change`, `ds-limit`, `ds-mode-change`, `ds-open-change`,
 `ds-error`, `ds-status-change`. `ds-answer`'s `detail` carries `charts` and
 `tables` when the answer showed any. A `ds-mode-change` the person started in the chat

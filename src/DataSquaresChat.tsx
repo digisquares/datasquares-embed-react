@@ -89,6 +89,19 @@ export interface ChatFeedback {
   note: string | null
 }
 
+/**
+ * The person added a chart or a table of an answer to a dashboard of theirs (a chat for people of your own company,
+ * where the embed app allows it). The card is made by DataSquares from the query it ran for the answer.
+ */
+export interface ChatSaved {
+  conversationId: string
+  answerIndex: number
+  /** The chart's or the table's title: the new card's name. */
+  title: string
+  dashboardId: string
+  dashboardName: string
+}
+
 /** The person picked a question instead of typing it. */
 export interface ChatFollowUp {
   conversationId: string | null
@@ -190,6 +203,8 @@ export interface DataSquaresChatProps {
   onLimitReached?: (limit: ChatLimit) => void
   /** The person rated an answer (helpful or not, why, and their note). */
   onFeedback?: (feedback: ChatFeedback) => void
+  /** The person added a chart or a table of an answer to a dashboard of theirs. */
+  onSaved?: (saved: ChatSaved) => void
   /** The person picked a follow-up under an answer, or one of the suggestions. */
   onFollowUp?: (pick: ChatFollowUp) => void
   /** The chat could not start (a bad token, a site not allowed, no Ask AI: `forbidden`), never spoke, or getToken failed. */
@@ -374,6 +389,9 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
       }
       case 'ds:chat-feedback':
         cb.onFeedback?.({ conversationId: msg.conversationId, answerIndex: msg.answerIndex, rating: msg.rating, reason: msg.reason, note: msg.note })
+        break
+      case 'ds:chat-saved':
+        cb.onSaved?.({ conversationId: msg.conversationId, answerIndex: msg.answerIndex, title: msg.title, dashboardId: msg.dashboardId, dashboardName: msg.dashboardName })
         break
       case 'ds:chat-follow-up':
         cb.onFollowUp?.({ conversationId: msg.conversationId, question: msg.question, source: msg.source })
