@@ -1,7 +1,7 @@
 {
   "name": "@digisquares/datasquares-react",
-  "version": "0.4.0",
-  "description": "React SDK and web components for DataSquares: embed dashboards, reports and presentations (one or a menu of them, in your own look) and the DataSquares AI chat over them, with typed events, host-side controls, each person's signed token from your server, and stand-ins for your tests.",
+  "version": "0.5.0",
+  "description": "React SDK and web components for DataSquares: embed dashboards, reports and presentations (one or a menu of them, in your own look) and the DataSquares AI chat over them, or on its own as an AI data analyst over your data models, with typed events, host-side controls, each person's signed token from your server, and stand-ins for your tests.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -76,6 +76,8 @@
     "analytics",
     "dashboard",
     "ai-chat",
+    "ai-analyst",
+    "chatbot",
     "react",
     "web-components"
   ]

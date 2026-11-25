@@ -11,6 +11,7 @@ export { buildChatUrl, buildEmbedUrl, buildSessionEmbedUrl, embedOrigin } from '
 export type { ChatUrlOptions, EmbedFont, EmbedMenuLayout, EmbedUrlOptions } from './urls.js'
 export {
   CHAT_CONTEXT_LIMITS,
+  CHAT_VISUAL_LIMITS,
   EMBED_PROTOCOL_VERSION,
   MAX_CHAT_QUESTION_CHARS,
   MAX_EMBED_TOKEN_CHARS,
@@ -18,7 +19,10 @@ export {
 } from './protocol.js'
 export type {
   AskCommand,
+  ChatChart,
   ChatContext,
+  ChatTable,
+  ChatVisualSource,
   ChatFeedbackReason,
   ChatMode,
   EmbedChatAnswerMessage,

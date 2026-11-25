@@ -3,7 +3,8 @@
 React SDK for DataSquares in your own app: dashboards, reports and
 presentations — one of them, or a menu of them in the embed app's look — with
 `<DataSquaresEmbed>`, and the DataSquares AI chat over them with
-`<DataSquaresChat>`. Typed events, host-side controls, loading and error
+`<DataSquaresChat>`, or on its own as an AI data analyst over your data models.
+Typed events, host-side controls, loading and error
 display, hooks, a token route for your server in three lines, and stand-ins for
 your tests.
 
@@ -73,7 +74,9 @@ hand, `signEmbedToken({ clientId, keyId, secret, ...claims })` returns the token
 the app's **menu**: `{ type: 'menu' }` for all of it, or `{ type: 'menu',
 items: [...] }` for some of its items (1 to 100 content ids) for this person —
 your premium customers see more, say. Items not on the app's menu are left out
-by DataSquares, so taking one off the app never breaks your route.
+by DataSquares, so taking one off the app never breaks your route. For the AI
+chat alone, `content` is `{ type: 'chat' }` ([A standalone AI data
+analyst](#a-standalone-ai-data-analyst)).
 
 ```tsx
 import { useRef } from 'react'
@@ -314,7 +317,9 @@ The DataSquares AI chat, in a DataSquares frame: answers stream as they are
 written, with progress lines, tables and charts drawn from the cards' own rows,
 and each person's earlier conversations. It answers from what the person's
 token names, under their row rules: one dashboard or report, or the embed app's
-menu — every dashboard and report of the person's menu. It uses the same token
+menu — every dashboard and report of the person's menu. Or, standalone, it is an
+AI data analyst over the app's data models ([below](#a-standalone-ai-data-analyst)).
+It uses the same token
 route as `<DataSquaresEmbed>`; the token's `role` must be `viewer_ai`, and the
 embed app's Ask AI on (Administration → Settings → Embedding). Questions spend
 the app's AI credits, within its monthly budgets and hourly limits.
@@ -346,6 +351,7 @@ first opens.
 | Prop | |
 |---|---|
 | `scope` | A menu token: `view` keeps the chat on the item the session opens (`item`); default the whole menu. |
+| `standalone` | The analyst alone (default `false`): the chat answers only from the app's data models ([below](#a-standalone-ai-data-analyst)). |
 | `title`, `greeting`, `placeholder` | The chat's heading (default "Ask AI"), what it says before the first question, the question field's placeholder. |
 | `suggestions` | Up to four questions to start with (default: questions about the menu's first items). |
 | `conversation` | One of the person's earlier conversations to open first (its id, from `onConversationChange`). |
@@ -356,7 +362,7 @@ first opens.
 | Event | Fires when |
 |---|---|
 | `onReady` | the chat can answer; with a menu token, `items` is the menu it asks about |
-| `onAnswer` | an answer is finished: `{ question, answer, conversationId, blocked, followUps, answerIndex }` (`blocked`: it was withheld; `followUps`: the questions it offers next; `answerIndex`: its number in the conversation) |
+| `onAnswer` | an answer is finished: `{ question, answer, conversationId, blocked, followUps, answerIndex, charts?, tables? }` (`blocked`: it was withheld; `followUps`: the questions it offers next; `answerIndex`: its number in the conversation; `charts` and `tables`: what it showed, as data, [below](#what-an-answer-showed-charts-and-tables)) |
 | `onFeedback` | the person rated an answer: `{ conversationId, answerIndex, rating, reason, note }` (`rating`: `up` or `down`; `reason` for a `down`; `note`: what they typed, which only you get) |
 | `onFollowUp` | the person picked a question instead of typing it: `{ conversationId, question, source }` (`source`: `follow-up` under an answer, or `suggestion`) |
 | `onConversationChange` | another conversation shows (a new one: `null` until its first answer) |
@@ -433,10 +439,89 @@ const chat = useDataSquaresChat({ defaultMode: 'panel' })
 ```
 
 In your tests, `simulateChat(iframe)` from `/testing` speaks as the chat:
-`ready({ items })`, `answer(…)`, `feedback(…)`, `followUp(…)`,
-`conversationChange(id)`, `limit(…)`, `requestMode(mode)`, `error(kind)`,
-`requestToken()`, and `commands` and `context` (the latest one sent) to assert
-on. In `panel` mode, open the panel first: the frame mounts then.
+`ready({ items })`, `answer(…)` (with `charts` and `tables` if you pass them),
+`feedback(…)`, `followUp(…)`, `conversationChange(id)`, `limit(…)`,
+`requestMode(mode)`, `error(kind)`, `requestToken()`, and `commands` and
+`context` (the latest one sent) to assert on. In `panel` mode, open the panel
+first: the frame mounts then.
+
+### A standalone AI data analyst
+
+The chat can stand on its own, with no dashboard beside it: people ask
+questions of your data and it answers from the data models the embed app
+names, never from the app's dashboards and reports. It names no dashboard and
+offers nothing about dashboards or reports.
+
+There are two ways to get it:
+
+- In DataSquares, switch off **Include this app's dashboards and reports in the
+  chat** on the embed app. Every chat of the app is then standalone.
+- Or ask for it from your page: `standalone` on `<DataSquaresChat>`, or the
+  `standalone` attribute on `<datasquares-chat>`. It only narrows: without it,
+  the app's own setting decides.
+
+```tsx
+<DataSquaresChat baseUrl="https://app.datasquares.ai" getToken={getToken} standalone defaultMode="inline" />
+```
+
+When the page has no dashboard at all, sign a token for the chat alone:
+`content: { type: 'chat' }`, with nothing beside its type, and the role
+`viewer_ai`. A `chat` token is always standalone. `signEmbedToken` refuses an
+`id` or `items` beside it, and any other role. `<DataSquaresEmbed>` has
+nothing to show with it.
+
+```ts
+const token = await signEmbedToken({
+  clientId: process.env.DS_EMBED_CLIENT_ID!,
+  keyId: process.env.DS_EMBED_KEY_ID!,
+  secret: process.env.DS_EMBED_SECRET!,
+  sub: user.id,
+  tenant: user.accountId,
+  role: 'viewer_ai',
+  attributes: { account: user.accountId },   // one per row rule of the app
+  content: { type: 'chat' },
+})
+```
+
+The app's administrator names the data models the chat may query
+(**Administration → Settings → Embedding →** the app **→ What the AI chat answers
+from**). If the app names none, a standalone chat says Ask AI isn't available
+and `onError` hears `forbidden`. Each person gets only their own rows: the
+app's row rules are added to every query, and people of your own company
+(internal embedding) read with their own access. The AI writes no SQL for your
+customers.
+
+### What an answer showed: `charts` and `tables`
+
+When an answer shows a chart or a table, `onAnswer` (and `ds-answer`'s
+`detail`) carries it as data, so your page can keep it, send it on, or draw it
+in its own look. Charts and tables are drawn from the server's own rows, never
+numbers the model wrote. Each field is there only when the answer showed
+something.
+
+```tsx
+<DataSquaresChat
+  baseUrl="https://app.datasquares.ai"
+  getToken={getToken}
+  onAnswer={({ charts, tables }) => {
+    for (const chart of charts ?? []) {
+      // { title, kind: 'bar' | 'line' | 'area' | 'pie', labels: ['North', 'South'],
+      //   series: [{ name: 'Revenue', values: [120, 95] }], stacked?, source?, item?, truncated? }
+      console.log(chart.title, chart.labels, chart.series)
+    }
+    for (const table of tables ?? []) {
+      // { title, columns: ['Customer', 'Orders'], rows: [['Acme', 12]], source?, item?, truncated? }
+      console.log(table.title, table.columns, table.rows.length)
+    }
+  }}
+/>
+```
+
+`source` says where it was read from: `card` (a card of the app's content,
+which `item` names) or `query` (a result the analyst queried). The SDK keeps
+only well-formed entries, at most 3 charts and 3 tables, 50 labels a chart, 12
+columns and 200 rows a table (`CHAT_VISUAL_LIMITS`); one cut short is
+`truncated`. The types are `ChatChart` and `ChatTable`.
 
 ## Without React: `<datasquares-chat>` and `<datasquares-embed>`
 
@@ -444,7 +529,7 @@ The same chat and embed as plain custom elements, for any page: no framework,
 nothing to build. One script defines both:
 
 ```html
-<script type="module" src="https://unpkg.com/@digisquares/datasquares-react@0.4.0/dist/element.js"></script>
+<script type="module" src="https://unpkg.com/@digisquares/datasquares-react@0.5.0/dist/element.js"></script>
 
 <datasquares-embed id="board" base-url="https://app.datasquares.ai" token-url="/analytics-token" menu="tabs"></datasquares-embed>
 
@@ -476,6 +561,7 @@ goes in an address.
 | `chat-title`, `greeting`, `placeholder` | The chat's heading, what it says first, the question field's placeholder (`title` is HTML's own tooltip attribute, so the heading is `chat-title`). |
 | `suggestions` | A JSON array of questions, or one question a line (up to four). |
 | `scope`, `item`, `conversation` | As the React props. |
+| `standalone` | Present: the analyst alone, as the React prop (also a `standalone` property). |
 | `theme`, `primary-color`, `logo-url`, `background`, `font` | The look. |
 | `launcher-label`, `position`, `panel-width`, `panel-height`, `height`, `z-index`, `load-timeout`, `frame-title` | As the React props. |
 
@@ -486,7 +572,8 @@ property), `reload()`. Properties: `status`, `error`.
 Events (each a bubbling `CustomEvent` whose `detail` is what the React callback
 gets): `ds-ready`, `ds-answer`, `ds-feedback`, `ds-follow-up`,
 `ds-conversation-change`, `ds-limit`, `ds-mode-change`, `ds-open-change`,
-`ds-error`, `ds-status-change`. A `ds-mode-change` the person started in the chat
+`ds-error`, `ds-status-change`. `ds-answer`'s `detail` carries `charts` and
+`tables` when the answer showed any. A `ds-mode-change` the person started in the chat
 is cancelable: `preventDefault()` keeps the mode you chose.
 
 ```js

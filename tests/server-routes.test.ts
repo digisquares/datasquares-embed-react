@@ -43,6 +43,18 @@ describe('createEmbedTokenHandler (Fetch)', () => {
     expect(onError).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'EmbedTokenInputError', field: 'secret' }))
   })
 
+  it('0.5: signs a chat-alone token the claims ask for, and refuses one for a viewer', async () => {
+    const analyst: EmbedTokenClaimsInput = { sub: 'person-1', role: 'viewer_ai', content: { type: 'chat' } }
+    const res = await createEmbedTokenHandler({ ...KEY, claims: () => analyst })(new Request('https://h/t'))
+    expect(res.status).toBe(200)
+    expect(decode((await res.text()).split('.')[1]!)).toMatchObject({ role: 'viewer_ai', content: { type: 'chat' } })
+
+    const onError = vi.fn()
+    const viewer = await createEmbedTokenHandler({ ...KEY, onError, claims: () => ({ ...analyst, role: 'viewer' }) })(new Request('https://h/t'))
+    expect(viewer.status).toBe(500)
+    expect(onError).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'EmbedTokenInputError', field: 'role' }))
+  })
+
   it("a claims object cannot replace the app's key", async () => {
     const sneaky = { ...PERSON, clientId: 'dsapp_other', keyId: '00000000-0000-0000-0000-000000000000', secret: 'guess' } as EmbedTokenClaimsInput
     const res = await createEmbedTokenHandler({ ...KEY, claims: () => sneaky })(new Request('https://h/t'))

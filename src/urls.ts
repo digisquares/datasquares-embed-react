@@ -99,6 +99,11 @@ export interface ChatUrlOptions {
   scope?: 'view' | 'menu'
   /** A menu token: the item the session opens (its content id). */
   item?: string
+  /**
+   * The analyst alone (`standalone=1`): the chat answers only from the app's data models. Only narrows: without it the
+   * app's own setting decides, and a `chat` token is always standalone.
+   */
+  standalone?: boolean
   /** The chat's heading (default "Ask AI"). */
   title?: string
   /** What the empty chat says. */
@@ -127,6 +132,7 @@ export function buildChatUrl(opts: ChatUrlOptions): string {
   set('font', opts.font)
   set('scope', opts.scope)
   set('item', opts.item)
+  if (opts.standalone === true) url.searchParams.set('standalone', '1')
   set('title', opts.title)
   set('greeting', opts.greeting)
   set('placeholder', opts.placeholder)

@@ -59,7 +59,7 @@ export interface UseDataSquaresChat {
   items: EmbedMenuItem[]
   /** The conversation shown (null: a new one, until its first answer). */
   conversationId: string | null
-  /** The latest finished answer. */
+  /** The latest finished answer (with the charts and tables it showed, when it showed any). */
   lastAnswer: ChatAnswer | null
   /** The latest budget or hourly limit that stopped a question (cleared by the next answer). */
   limit: ChatLimit | null

@@ -60,6 +60,80 @@ describe('the chat URL', () => {
     })
     expect(url.search).not.toMatch(/token/)
   })
+
+  it('0.5: standalone=1 only when standalone is true', () => {
+    expect(new URL(buildChatUrl({ baseUrl: BASE, standalone: true })).searchParams.get('standalone')).toBe('1')
+    expect(new URL(buildChatUrl({ baseUrl: BASE, standalone: false })).searchParams.has('standalone')).toBe(false)
+    expect(new URL(buildChatUrl({ baseUrl: BASE })).searchParams.has('standalone')).toBe(false)
+  })
+})
+
+describe('0.5: a standalone AI data analyst', () => {
+  const CHART = { title: 'Revenue by region', kind: 'bar' as const, labels: ['North', 'South'], series: [{ name: 'Revenue', values: [120, null] }], source: 'query' as const, item: null }
+  const TABLE = { title: 'Top customers', columns: ['Customer', 'Orders', 'Active'], rows: [['Acme', 12, true], ['Globex', 7, null]], source: 'card' as const, item: { id: 'd1', name: 'Sales' } }
+
+  it('standalone puts standalone=1 in the frame\'s address; turning it on loads the frame again', () => {
+    const { rerender } = render(<DataSquaresChat baseUrl={BASE} getToken={getToken} defaultMode="inline" />)
+    expect(new URL(frame().src).searchParams.has('standalone')).toBe(false)
+    rerender(<DataSquaresChat baseUrl={BASE} getToken={getToken} defaultMode="inline" standalone />)
+    expect(new URL(frame().src).searchParams.get('standalone')).toBe('1')
+    const chat = simulateChat(frame())
+    chat.ready()
+    expect(chat.commands).toContainEqual({ type: 'ds:set-mode', version: 1, mode: 'inline' })
+  })
+
+  it('onAnswer hears the charts and tables an answer showed, and the hook keeps them', () => {
+    const onAnswer = vi.fn()
+    render(<DataSquaresChat baseUrl={BASE} getToken={getToken} defaultMode="inline" onAnswer={onAnswer} />)
+    const chat = simulateChat(frame())
+    chat.answer({ question: 'Revenue by region?', answer: 'North leads.', conversationId: 'c-1', charts: [CHART], tables: [TABLE] })
+    expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ charts: [CHART], tables: [TABLE] }))
+    chat.answer({ question: 'Thanks', answer: 'You are welcome.', conversationId: 'c-1' })
+    const plain = onAnswer.mock.calls[1]![0]
+    expect('charts' in plain || 'tables' in plain).toBe(false)
+  })
+
+  it('keeps only well-formed charts and tables, within their bounds, and drops a field with none left', () => {
+    const onAnswer = vi.fn()
+    render(<DataSquaresChat baseUrl={BASE} getToken={getToken} defaultMode="inline" onAnswer={onAnswer} />)
+    const chat = simulateChat(frame())
+    const base = { type: 'ds:chat-answer', version: 1, conversationId: null, question: 'q', answer: 'a', blocked: false }
+    chat.send({
+      ...base,
+      charts: [
+        { ...CHART, kind: 'radar' },
+        { ...CHART, labels: [1, 2] },
+        { ...CHART, series: [{ name: 'x', values: ['12'] }] },
+        CHART,
+        { ...CHART, title: 'Long', labels: Array.from({ length: 60 }, (_, i) => `d${i}`), series: [{ name: 's', values: Array.from({ length: 60 }, (_, i) => i) }] },
+        CHART,
+        CHART,
+      ],
+      tables: 'not a list',
+    })
+    const got = onAnswer.mock.calls[0]![0]
+    expect(got.charts).toHaveLength(3)
+    expect(got.charts[0]).toEqual(CHART)
+    expect(got.charts[1].labels).toHaveLength(50)
+    expect(got.charts[1].series[0].values).toHaveLength(50)
+    expect(got.charts[1].truncated).toBe(true)
+    expect('tables' in got).toBe(false)
+
+    chat.send({
+      ...base,
+      charts: [{ title: 'Only bad', kind: 'pie', labels: [], series: [] }],
+      tables: [
+        { ...TABLE, columns: Array.from({ length: 14 }, (_, i) => `c${i}`), rows: [...Array.from({ length: 210 }, (_, i) => [i]), ['ok'], [{ bad: true }]] },
+        { title: 'No columns', columns: [], rows: [] },
+      ],
+    })
+    const next = onAnswer.mock.calls[1]![0]
+    expect('charts' in next).toBe(false)
+    expect(next.tables).toHaveLength(1)
+    expect(next.tables[0].columns).toHaveLength(12)
+    expect(next.tables[0].rows).toHaveLength(200)
+    expect(next.tables[0].truncated).toBe(true)
+  })
 })
 
 describe('a panel (the default)', () => {

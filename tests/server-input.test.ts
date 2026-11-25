@@ -51,6 +51,42 @@ describe('signEmbedToken: inputs DataSquares would refuse', () => {
   })
 })
 
+describe('signEmbedToken: the chat alone (0.5)', () => {
+  const chatOnly: SignEmbedTokenInput = { ...KEY, sub: 'person-1', role: 'viewer_ai', content: { type: 'chat' } }
+
+  it("signs { type: 'chat' } for a viewer_ai, as it is", async () => {
+    const claims = decode((await signEmbedToken(chatOnly)).split('.')[1]!)
+    expect(claims.content).toEqual({ type: 'chat' })
+    expect(claims.role).toBe('viewer_ai')
+  })
+
+  it('refuses an id or items beside it', async () => {
+    const withId = { ...chatOnly, content: { type: 'chat', id: 'c0ffee00-2a4c-4e0b-9f53-6f4c3b9a1e03' } } as unknown as SignEmbedTokenInput
+    await expect(signEmbedToken(withId)).rejects.toMatchObject({ name: 'EmbedTokenInputError', field: 'content.id' })
+    const withItems = { ...chatOnly, content: { type: 'chat', items: [] } } as unknown as SignEmbedTokenInput
+    const err = await signEmbedToken(withItems).catch((e: Error) => e)
+    expect(err).toMatchObject({ name: 'EmbedTokenInputError', field: 'content.items' })
+    expect(String(err)).toMatch(/content\.items is not taken by a chat token: its content is \{ type: 'chat' \} alone/)
+  })
+
+  it('refuses a chat token for a viewer, or with no role (a viewer by default)', async () => {
+    await expect(signEmbedToken({ ...chatOnly, role: 'viewer' })).rejects.toMatchObject({ name: 'EmbedTokenInputError', field: 'role' })
+    const { role: _role, ...noRole } = chatOnly
+    const err = await signEmbedToken(noRole).catch((e: Error) => e)
+    expect(err).toMatchObject({ field: 'role' })
+    expect(String(err)).toMatch(/role must be 'viewer_ai' for a chat token/)
+  })
+
+  it('types it: a chat content takes nothing beside its type', () => {
+    const ok: SignEmbedTokenInput['content'] = { type: 'chat' }
+    // @ts-expect-error a chat token names no content
+    const withId: SignEmbedTokenInput['content'] = { type: 'chat', id: 'c0ffee00-2a4c-4e0b-9f53-6f4c3b9a1e03' }
+    // @ts-expect-error nor a menu's items
+    const withItems: SignEmbedTokenInput['content'] = { type: 'chat', items: ['c0ffee00-2a4c-4e0b-9f53-6f4c3b9a1e03'] }
+    expect([ok, withId, withItems]).toHaveLength(3)
+  })
+})
+
 describe('signEmbedToken: every shape DataSquares reads still signs', () => {
   it('attributes of text, numbers, booleans and lists; dotted and underscored names; an empty tenant', async () => {
     const attributes = { account: 'A-1', 'geo.region': ['West', 2], active: true, tier: 3, _x: 'y' }

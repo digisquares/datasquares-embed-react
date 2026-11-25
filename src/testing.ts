@@ -16,8 +16,10 @@
 import * as React from 'react'
 import {
   EMBED_PROTOCOL_VERSION,
+  type ChatChart,
   type ChatContext,
   type ChatFeedbackReason,
+  type ChatTable,
   type EmbedContentType,
   type EmbedErrorKind,
   type EmbedFilter,
@@ -175,8 +177,17 @@ export interface ChatSimulator {
   readonly tokens: string[]
   /** The chat is ready to answer; with a menu token, pass the menu it asks about. */
   ready(info?: { items?: EmbedMenuItem[] }): void
-  /** An answer is finished (with the follow-ups it offers, and its number in the conversation). */
-  answer(answer: { question: string; answer: string; conversationId?: string | null; blocked?: boolean; followUps?: string[]; answerIndex?: number | null }): void
+  /** An answer is finished (with the follow-ups it offers, its number in the conversation, and the charts and tables it showed). */
+  answer(answer: {
+    question: string
+    answer: string
+    conversationId?: string | null
+    blocked?: boolean
+    followUps?: string[]
+    answerIndex?: number | null
+    charts?: ChatChart[]
+    tables?: ChatTable[]
+  }): void
   /** The person rated an answer. */
   feedback(feedback: { conversationId: string; answerIndex?: number; rating: 'up' | 'down'; reason?: ChatFeedbackReason | null; note?: string | null }): void
   /** The person picked a follow-up under an answer, or a suggestion. */
@@ -218,6 +229,9 @@ export function simulateChat(target: HTMLIFrameElement | ParentNode, options: Om
         blocked: a.blocked ?? false,
         followUps: a.followUps ?? [],
         answerIndex: a.answerIndex ?? null,
+        // As the chat sends them: only when the answer showed something.
+        ...(a.charts ? { charts: a.charts } : {}),
+        ...(a.tables ? { tables: a.tables } : {}),
       }),
     feedback: (f) =>
       embed.send({ type: 'ds:chat-feedback', version: v, conversationId: f.conversationId, answerIndex: f.answerIndex ?? 0, rating: f.rating, reason: f.reason ?? null, note: f.note ?? null }),

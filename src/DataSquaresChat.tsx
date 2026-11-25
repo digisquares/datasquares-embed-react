@@ -2,7 +2,8 @@
 /**
  * <DataSquaresChat> — the DataSquares AI chat in your page: the same chat as DataSquares' own, running in a DataSquares
  * frame, answering from the dashboards and reports each person's signed token names (one of them, or the embed app's
- * menu: all of its dashboards and reports), under their own row rules and the app's AI budgets.
+ * menu: all of its dashboards and reports), under their own row rules and the app's AI budgets. A standalone chat (a
+ * `chat` token, the app's setting, or `standalone`) is the analyst alone: it answers from the data models the app names.
  *
  * ── Three ways to show it, switchable at any time ───────────────────────
  *   - `inline`: it fills a box of your page (`height`).
@@ -26,7 +27,7 @@
  * `<DataSquaresEmbed>` beside it, pass its `onItemChange` and `onFilterChange` along. A hint, never access.
  *
  * ── What you hear ───────────────────────────────────────────────────────
- * Each answer (`onAnswer`, with the follow-ups it offers), each rating (`onFeedback`: helpful or not, why, and the
+ * Each answer (`onAnswer`, with the follow-ups it offers and the charts and tables it showed, as data), each rating (`onFeedback`: helpful or not, why, and the
  * person's note, which only you get), each follow-up or suggestion picked (`onFollowUp`), each conversation change and
  * each limit reached.
  */
@@ -35,9 +36,13 @@ import {
   CHAT_CONTEXT_LIMITS,
   EMBED_PROTOCOL_VERSION,
   MAX_CHAT_QUESTION_CHARS,
+  boundedChatCharts,
+  boundedChatTables,
+  type ChatChart,
   type ChatContext,
   type ChatFeedbackReason,
   type ChatMode,
+  type ChatTable,
   type EmbedInMessage,
   type EmbedMenuItem,
   type EmbedOutMessage,
@@ -46,7 +51,7 @@ import { buildChatUrl, embedOrigin as originOf, type EmbedFont } from './urls.js
 import { DEV, isInsecureRemote, warnOnce } from './dev.js'
 import { DEFAULT_LOAD_TIMEOUT_MS, useFrameBridge, type EmbedError, type EmbedStatus } from './frame-bridge.js'
 
-export type { ChatContext, ChatFeedbackReason, ChatMode } from './protocol.js'
+export type { ChatChart, ChatContext, ChatFeedbackReason, ChatMode, ChatTable, ChatVisualSource } from './protocol.js'
 
 /** What `onReady` hears: the menu the chat asks about (empty when it asks about one dashboard or report). */
 export interface ChatReadyInfo {
@@ -63,6 +68,10 @@ export interface ChatAnswer {
   followUps: string[]
   /** Its number in the conversation (0 first), as `onFeedback` names it; null when it was not kept. */
   answerIndex: number | null
+  /** The charts it showed, as data (present only when it showed one): drawn from the server's own rows. */
+  charts?: ChatChart[]
+  /** The tables it showed, as data (present only when it showed one). */
+  tables?: ChatTable[]
 }
 
 /** The person rated an answer. */
@@ -100,8 +109,9 @@ export interface DataSquaresChatProps {
   baseUrl: string
   /**
    * Returns a short-lived token YOUR server signed for the current person with your embed app's key — the same route
-   * as `<DataSquaresEmbed>`'s. Its `content` decides what the chat asks about: one dashboard or report, or the app's
-   * menu. The token's role must be `viewer_ai`, and the app's Ask AI on.
+   * as `<DataSquaresEmbed>`'s. Its `content` decides what the chat asks about: one dashboard or report, the app's
+   * menu, or the chat alone (`{ type: 'chat' }`: the analyst, over the app's data models). The token's role must be
+   * `viewer_ai`, and the app's Ask AI on.
    */
   getToken: () => Promise<string>
   /** How the chat shows now (controlled; pair with `onModeChange`). */
@@ -119,6 +129,11 @@ export interface DataSquaresChatProps {
   scope?: 'view' | 'menu'
   /** A menu token: the item the session opens (its content id). */
   item?: string
+  /**
+   * The analyst alone (default false): the chat answers only from the app's data models, never from its dashboards and
+   * reports. Only narrows: without it, the app's own setting decides (and a `chat` token is always standalone).
+   */
+  standalone?: boolean
   /** The chat's heading (default "Ask AI"). */
   title?: string
   /** What the empty chat says. */
@@ -261,6 +276,7 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
     defaultOpen = false,
     scope,
     item,
+    standalone = false,
     title,
     greeting,
     placeholder,
@@ -329,9 +345,9 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
 
   const suggestionsKey = (suggestions ?? []).join('\u0000')
   const src = useMemo(
-    () => buildChatUrl({ baseUrl, theme, primaryColor, logoUrl, background, font, scope, item, title, greeting, placeholder, suggestions, conversation }),
+    () => buildChatUrl({ baseUrl, theme, primaryColor, logoUrl, background, font, scope, item, standalone, title, greeting, placeholder, suggestions, conversation }),
     // `suggestions` by its contents (suggestionsKey), not its identity.
-    [baseUrl, theme, primaryColor, logoUrl, background, font, scope, item, title, greeting, placeholder, suggestionsKey, conversation],
+    [baseUrl, theme, primaryColor, logoUrl, background, font, scope, item, standalone, title, greeting, placeholder, suggestionsKey, conversation],
   )
 
   const onMessage = (msg: EmbedOutMessage) => {
@@ -340,7 +356,10 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
       case 'ds:ready':
         if (msg.contentType === 'chat') cb.onReady?.({ items: msg.items ?? [] })
         break
-      case 'ds:chat-answer':
+      case 'ds:chat-answer': {
+        // What it showed, only its well-formed entries; the fields only when something is left.
+        const charts = boundedChatCharts(msg.charts)
+        const tables = boundedChatTables(msg.tables)
         cb.onAnswer?.({
           question: msg.question,
           answer: msg.answer,
@@ -348,8 +367,11 @@ export const DataSquaresChat = forwardRef<DataSquaresChatHandle, DataSquaresChat
           blocked: msg.blocked,
           followUps: msg.followUps ?? [],
           answerIndex: msg.answerIndex ?? null,
+          ...(charts ? { charts } : {}),
+          ...(tables ? { tables } : {}),
         })
         break
+      }
       case 'ds:chat-feedback':
         cb.onFeedback?.({ conversationId: msg.conversationId, answerIndex: msg.answerIndex, rating: msg.rating, reason: msg.reason, note: msg.note })
         break

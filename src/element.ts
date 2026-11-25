@@ -2,7 +2,7 @@
  * `<datasquares-chat>` and `<datasquares-embed>` — the DataSquares AI chat and embed for pages without React: plain
  * custom elements, with no framework and nothing to build. One script defines both:
  *
- *   <script type="module" src="https://unpkg.com/@digisquares/datasquares-react@0.4.0/dist/element.js"></script>
+ *   <script type="module" src="https://unpkg.com/@digisquares/datasquares-react@0.5.0/dist/element.js"></script>
  *   <datasquares-chat base-url="https://app.datasquares.ai" token-url="/analytics-token"></datasquares-chat>
  *
  * The same frames, protocol and rules as `<DataSquaresChat>` and `<DataSquaresEmbed>`: each person's signed token,
@@ -23,6 +23,8 @@ import {
   EMBED_PROTOCOL_VERSION,
   MAX_CHAT_QUESTION_CHARS,
   MAX_EMBED_TOKEN_CHARS,
+  boundedChatCharts,
+  boundedChatTables,
   type ChatContext,
   type ChatMode,
   type EmbedFilter,
@@ -34,7 +36,7 @@ import {
 import { buildChatUrl, buildEmbedUrl, buildSessionEmbedUrl, embedOrigin, type EmbedFont, type EmbedMenuLayout } from './urls.js'
 import { DEFAULT_LOAD_TIMEOUT_MS, FrameChannel, type EmbedError, type EmbedStatus } from './frame-channel.js'
 
-export type { ChatContext, ChatMode, EmbedFilter, EmbedMenuItem, EmbedState } from './protocol.js'
+export type { ChatChart, ChatContext, ChatMode, ChatTable, EmbedFilter, EmbedMenuItem, EmbedState } from './protocol.js'
 export type { EmbedError, EmbedStatus } from './frame-channel.js'
 
 /** A base to extend where custom elements exist; a stand-in class elsewhere, so importing on a server never throws. */
@@ -208,7 +210,7 @@ abstract class FrameElement extends ElementBase {
 
 // ─── <datasquares-chat> ─────────────────────────────────────────────────────────────────────────────────────────────
 
-const CHAT_URL_ATTRIBUTES = ['base-url', 'theme', 'primary-color', 'logo-url', 'background', 'font', 'scope', 'item', 'chat-title', 'greeting', 'placeholder', 'suggestions', 'conversation']
+const CHAT_URL_ATTRIBUTES = ['base-url', 'theme', 'primary-color', 'logo-url', 'background', 'font', 'scope', 'item', 'standalone', 'chat-title', 'greeting', 'placeholder', 'suggestions', 'conversation']
 const CHAT_LAST_WINS: ReadonlySet<EmbedInMessage['type']> = new Set(['ds:set-mode', 'ds:open-conversation', 'ds:new-conversation', 'ds:set-context'])
 const CHAT_MODES: ReadonlySet<string> = new Set(['inline', 'panel', 'fullscreen'])
 const SPARKLE =
@@ -245,11 +247,11 @@ function boundedContext(c: ChatContext | null | undefined): ChatContext | null {
 
 /**
  * The DataSquares AI chat. Attributes: `base-url` (required), `token-url`, `mode` (`panel` default, `inline`,
- * `fullscreen`), `open` (a panel open), `scope`, `item`, `chat-title`, `greeting`, `placeholder`, `suggestions` (a JSON
- * array, or one a line), `conversation`, `theme`, `primary-color`, `logo-url`, `background`, `font`, `launcher-label`,
- * `position` (`bottom-right`, `bottom-left`), `panel-width`, `panel-height`, `height` (inline), `z-index`,
- * `load-timeout`, `frame-title`, `follows` (a `<datasquares-embed>`'s id). Properties: `getToken`, `context`, `status`,
- * `error`. Methods: `ask`, `newConversation`, `openConversation`, `setMode`, `setOpen`, `setContext`, `reload`. Events:
+ * `fullscreen`), `open` (a panel open), `scope`, `item`, `standalone` (the analyst alone), `chat-title`, `greeting`,
+ * `placeholder`, `suggestions` (a JSON array, or one a line), `conversation`, `theme`, `primary-color`, `logo-url`,
+ * `background`, `font`, `launcher-label`, `position` (`bottom-right`, `bottom-left`), `panel-width`, `panel-height`,
+ * `height` (inline), `z-index`, `load-timeout`, `frame-title`, `follows` (a `<datasquares-embed>`'s id). Properties:
+ * `getToken`, `context`, `standalone`, `status`, `error`. Methods: `ask`, `newConversation`, `openConversation`, `setMode`, `setOpen`, `setContext`, `reload`. Events:
  * `ds-ready`, `ds-answer`, `ds-feedback`, `ds-follow-up`, `ds-conversation-change`, `ds-limit`, `ds-mode-change`
  * (cancelable when the person switched in the chat: the switch is undone), `ds-open-change`, `ds-error`,
  * `ds-status-change`.
@@ -310,6 +312,14 @@ export class DataSquaresChatElement extends FrameElement {
     this.toggleAttribute('open', next)
   }
 
+  /** The analyst alone: the chat answers only from the app's data models (`standalone=1`). Only narrows. */
+  get standalone(): boolean {
+    return this.hasAttribute('standalone')
+  }
+  set standalone(next: boolean) {
+    this.toggleAttribute('standalone', Boolean(next))
+  }
+
   /** What the person is looking at; each question carries it (null clears it). */
   get context(): ChatContext | null {
     return this.ctx ?? null
@@ -323,7 +333,7 @@ export class DataSquaresChatElement extends FrameElement {
   }
 
   connectedCallback(): void {
-    this.upgradeProperties(['getToken', 'context', 'mode', 'open'])
+    this.upgradeProperties(['getToken', 'context', 'mode', 'open', 'standalone'])
     if (typeof window.matchMedia === 'function') {
       this.narrow = window.matchMedia('(max-width: 640px)')
       this.narrow.addEventListener?.('change', this.onNarrow)
@@ -412,6 +422,7 @@ export class DataSquaresChatElement extends FrameElement {
       font: (this.getAttribute('font') as EmbedFont | null) ?? undefined,
       scope: this.getAttribute('scope') === 'view' ? 'view' : this.getAttribute('scope') === 'menu' ? 'menu' : undefined,
       item: this.getAttribute('item') ?? undefined,
+      standalone: this.standalone,
       title: this.getAttribute('chat-title') ?? undefined,
       greeting: this.getAttribute('greeting') ?? undefined,
       placeholder: this.getAttribute('placeholder') ?? undefined,
@@ -425,7 +436,9 @@ export class DataSquaresChatElement extends FrameElement {
       case 'ds:ready':
         if (msg.contentType === 'chat') this.emit('ds-ready', { items: msg.items ?? [] })
         break
-      case 'ds:chat-answer':
+      case 'ds:chat-answer': {
+        const charts = boundedChatCharts(msg.charts)
+        const tables = boundedChatTables(msg.tables)
         this.emit('ds-answer', {
           question: msg.question,
           answer: msg.answer,
@@ -433,8 +446,11 @@ export class DataSquaresChatElement extends FrameElement {
           blocked: msg.blocked,
           followUps: msg.followUps ?? [],
           answerIndex: msg.answerIndex ?? null,
+          ...(charts ? { charts } : {}),
+          ...(tables ? { tables } : {}),
         })
         break
+      }
       case 'ds:chat-feedback':
         this.emit('ds-feedback', { conversationId: msg.conversationId, answerIndex: msg.answerIndex, rating: msg.rating, reason: msg.reason, note: msg.note })
         break

@@ -17,6 +17,12 @@
  * edge runtimes with no dependency. Ten minutes at most; five by default.
  */
 
+/** What a token's session opens: one item of the app's content, the app's menu, or the AI chat alone. */
+export type EmbedTokenContent =
+  | { type: 'dashboard' | 'report' | 'presentation'; id: string }
+  | { type: 'menu'; items?: string[] }
+  | { type: 'chat'; id?: never; items?: never }
+
 export interface SignEmbedTokenInput {
   /** The embed app's client id (goes in the token as `iss`). */
   clientId: string
@@ -28,7 +34,7 @@ export interface SignEmbedTokenInput {
   sub: string
   /** Their customer account, for a product that serves many companies. */
   tenant?: string
-  /** `viewer`, or `viewer_ai` for a viewer who may ask the AI (default `viewer`). */
+  /** `viewer`, or `viewer_ai` for a viewer who may ask the AI (default `viewer`; a `chat` token needs `viewer_ai`). */
   role?: 'viewer' | 'viewer_ai'
   /**
    * The values their rows are filtered by, one for each of the app's row rules
@@ -38,9 +44,11 @@ export interface SignEmbedTokenInput {
   /**
    * What the session opens: one dashboard, report or presentation of the app's content (a presentation in present mode),
    * or the app's menu — `{ type: 'menu' }` for all of it, `{ type: 'menu', items: [...] }` for some of its items (content
-   * ids, 1 to 100) for this person. Items not on the app's menu are left out by DataSquares.
+   * ids, 1 to 100) for this person. Items not on the app's menu are left out by DataSquares. Or the AI chat alone,
+   * `{ type: 'chat' }` (nothing beside its type, and `role: 'viewer_ai'`): a session with no dashboard behind it, whose
+   * chat answers from the data models the embed app names (the analyst). `<DataSquaresChat>` opens it; the embed does not.
    */
-  content: { type: 'dashboard' | 'report' | 'presentation'; id: string } | { type: 'menu'; items?: string[] }
+  content: EmbedTokenContent
   /** Seconds until it expires: 300 by default, 600 at most. */
   ttlSeconds?: number
   /** The clock, in milliseconds (tests). */
@@ -90,7 +98,17 @@ function checkInput(input: SignEmbedTokenInput): void {
     throw new EmbedTokenInputError('role', "must be 'viewer' or 'viewer_ai'.")
   }
   const content = input.content as unknown
-  if (isRecord(content) && content.type === 'menu') {
+  if (isRecord(content) && content.type === 'chat') {
+    // The chat alone: nothing beside its type (it names no content; the app's data models are what it answers from).
+    for (const [key, value] of Object.entries(content)) {
+      if (key !== 'type' && value !== undefined) {
+        throw new EmbedTokenInputError(`content.${key}`, "is not taken by a chat token: its content is { type: 'chat' } alone.")
+      }
+    }
+    if (input.role !== 'viewer_ai') {
+      throw new EmbedTokenInputError('role', "must be 'viewer_ai' for a chat token ({ type: 'chat' }): it opens the AI chat alone.")
+    }
+  } else if (isRecord(content) && content.type === 'menu') {
     if (content.items !== undefined) {
       const items = content.items
       if (!Array.isArray(items) || items.length === 0 || items.length > MAX_MENU_ITEMS) {
@@ -105,7 +123,7 @@ function checkInput(input: SignEmbedTokenInput): void {
     }
   } else {
     if (!isRecord(content) || !CONTENT_TYPES.has(content.type)) {
-      throw new EmbedTokenInputError('content', "must be { type: 'dashboard' | 'report' | 'presentation', id } or { type: 'menu', items? }.")
+      throw new EmbedTokenInputError('content', "must be { type: 'dashboard' | 'report' | 'presentation', id }, { type: 'menu', items? } or { type: 'chat' }.")
     }
     if (typeof content.id !== 'string' || !UUID_RE.test(content.id)) {
       throw new EmbedTokenInputError('content.id', 'must be the content\'s id, a UUID.')

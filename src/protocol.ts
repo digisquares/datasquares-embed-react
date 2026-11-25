@@ -121,9 +121,40 @@ export interface EmbedTokenRequestMessage {
   reason: 'start' | 'renew'
 }
 
+/** Where an answer's chart or table was read from: a card of the app's content, or a result the analyst queried. */
+export type ChatVisualSource = 'card' | 'query'
+
+/**
+ * A chart an answer showed, as data: drawn from the server's own rows, never numbers the model wrote. `labels` are the
+ * categories (or dates) along it; each series has one value a label (null: none). `item` is the dashboard or report it
+ * was read from (a `card` source); `truncated`: there was more than it carries.
+ */
+export interface ChatChart {
+  title: string
+  kind: 'bar' | 'line' | 'area' | 'pie'
+  labels: string[]
+  series: Array<{ name: string; values: Array<number | null> }>
+  stacked?: boolean
+  source?: ChatVisualSource
+  item?: { id: string; name: string } | null
+  truncated?: boolean
+}
+
+/** A table an answer showed, as data: its columns and rows, from the server's own rows. */
+export interface ChatTable {
+  title: string
+  columns: string[]
+  rows: Array<Array<string | number | boolean | null>>
+  source?: ChatVisualSource
+  item?: { id: string; name: string } | null
+  truncated?: boolean
+}
+
 /**
  * The chat's answer is finished, as kept (`blocked`: it was withheld), with the follow-up questions it offers and its
- * number in the conversation (null when it was not kept), as a rating names it.
+ * number in the conversation (null when it was not kept), as a rating names it. `charts` and `tables`: what it showed,
+ * present only when it showed something. The guard leaves them unchecked; `boundedChatCharts` / `boundedChatTables`
+ * keep their well-formed entries.
  */
 export interface EmbedChatAnswerMessage {
   type: 'ds:chat-answer'
@@ -134,6 +165,8 @@ export interface EmbedChatAnswerMessage {
   blocked: boolean
   followUps?: string[]
   answerIndex?: number | null
+  charts?: ChatChart[]
+  tables?: ChatTable[]
 }
 
 /** Why the person said an answer was not helpful. */
@@ -347,6 +380,102 @@ const isMenuItem = (i: unknown): i is EmbedMenuItem =>
   CONTENT_TYPES.has(i.type) &&
   typeof i.name === 'string' &&
   (i.section === null || typeof i.section === 'string')
+
+/** The most of an answer's charts and tables the SDK keeps: what is past them is left out, and a chart or table cut short is `truncated`. */
+export const CHAT_VISUAL_LIMITS = { charts: 3, tables: 3, labels: 50, columns: 12, rows: 200 } as const
+
+const CHART_KINDS: ReadonlySet<unknown> = new Set(['bar', 'line', 'area', 'pie'])
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** The optional fields a chart and a table share, each kept only when well-formed. */
+function visualExtras(v: Record<string, unknown>): Pick<ChatTable, 'source' | 'item'> {
+  const out: Pick<ChatTable, 'source' | 'item'> = {}
+  if (v.source === 'card' || v.source === 'query') out.source = v.source
+  if (v.item === null) out.item = null
+  else if (isRecord(v.item) && typeof v.item.id === 'string' && typeof v.item.name === 'string') out.item = { id: v.item.id, name: v.item.name }
+  return out
+}
+
+function boundedChart(c: unknown): ChatChart | null {
+  if (!isRecord(c) || typeof c.title !== 'string' || !CHART_KINDS.has(c.kind)) return null
+  if (!Array.isArray(c.labels) || c.labels.length === 0 || !c.labels.every((l) => typeof l === 'string')) return null
+  if (!Array.isArray(c.series)) return null
+  const labels = (c.labels as string[]).slice(0, CHAT_VISUAL_LIMITS.labels)
+  const series: ChatChart['series'] = []
+  for (const s of c.series) {
+    if (!isRecord(s) || typeof s.name !== 'string' || !Array.isArray(s.values)) continue
+    if (!s.values.every((v) => v === null || isFiniteNumber(v))) continue
+    series.push({ name: s.name, values: (s.values as Array<number | null>).slice(0, labels.length) })
+  }
+  if (series.length === 0) return null
+  const cut = labels.length < c.labels.length
+  return {
+    title: c.title,
+    kind: c.kind as ChatChart['kind'],
+    labels,
+    series,
+    ...(typeof c.stacked === 'boolean' ? { stacked: c.stacked } : {}),
+    ...visualExtras(c),
+    ...(cut ? { truncated: true } : typeof c.truncated === 'boolean' ? { truncated: c.truncated } : {}),
+  }
+}
+
+const isCell = (v: unknown): v is string | number | boolean | null => v === null || typeof v === 'string' || typeof v === 'boolean' || isFiniteNumber(v)
+
+function boundedTable(t: unknown): ChatTable | null {
+  if (!isRecord(t) || typeof t.title !== 'string') return null
+  if (!Array.isArray(t.columns) || t.columns.length === 0 || !t.columns.every((c) => typeof c === 'string')) return null
+  if (!Array.isArray(t.rows)) return null
+  const columns = (t.columns as string[]).slice(0, CHAT_VISUAL_LIMITS.columns)
+  const rows: ChatTable['rows'] = []
+  let cut = columns.length < t.columns.length
+  for (const r of t.rows) {
+    if (!Array.isArray(r) || !r.every(isCell)) continue
+    if (rows.length === CHAT_VISUAL_LIMITS.rows) {
+      cut = true
+      break
+    }
+    rows.push(r.slice(0, columns.length))
+  }
+  return {
+    title: t.title,
+    columns,
+    rows,
+    ...visualExtras(t),
+    ...(cut ? { truncated: true } : typeof t.truncated === 'boolean' ? { truncated: t.truncated } : {}),
+  }
+}
+
+/**
+ * An answer's `charts`, from untrusted message data: only the well-formed ones (text where text is expected, a `kind`
+ * of the four, values that are numbers or null), 3 at most, each with 50 labels at most; undefined when none is left.
+ */
+export function boundedChatCharts(value: unknown): ChatChart[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const out: ChatChart[] = []
+  for (const c of value) {
+    const chart = boundedChart(c)
+    if (chart) out.push(chart)
+    if (out.length === CHAT_VISUAL_LIMITS.charts) break
+  }
+  return out.length > 0 ? out : undefined
+}
+
+/**
+ * An answer's `tables`, from untrusted message data: only the well-formed ones (text columns, rows of text, numbers,
+ * true/false or null), 3 at most, each with 12 columns and 200 rows at most; undefined when none is left.
+ */
+export function boundedChatTables(value: unknown): ChatTable[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const out: ChatTable[] = []
+  for (const t of value) {
+    const table = boundedTable(t)
+    if (table) out.push(table)
+    if (out.length === CHAT_VISUAL_LIMITS.tables) break
+  }
+  return out.length > 0 ? out : undefined
+}
 
 /**
  * Structural guard over untrusted postMessage data. The host validates source

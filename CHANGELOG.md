@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- A standalone AI data analyst: the chat on its own, answering only from the
+  data models the embed app names, never from its dashboards and reports.
+  `standalone` on `<DataSquaresChat>` (and `buildChatUrl()`), or the
+  `standalone` attribute and property on `<datasquares-chat>`, asks for it
+  (`standalone=1` in the chat's address). It only narrows: without it, the
+  embed app's own setting decides. An app with no data models says Ask AI
+  isn't available (`onError` hears `forbidden`). README: A standalone AI data
+  analyst.
+- A token for the chat alone: `signEmbedToken` takes `content: { type: 'chat' }`
+  (nothing beside its type) with `role: 'viewer_ai'`, and refuses an `id` or
+  `items` beside it, or another role, with an `EmbedTokenInputError`. Such a
+  session has no dashboard behind it and is always standalone;
+  `<DataSquaresEmbed>` has nothing to show with it. `EmbedTokenContent` is the
+  content's type.
+- What an answer showed, as data: `onAnswer` (and `ds-answer`'s `detail`, and
+  the hook's `lastAnswer`) carries `charts` and `tables` when the answer showed
+  any (`ChatChart`, `ChatTable`, `ChatVisualSource`), drawn from the server's
+  own rows. Only well-formed entries are kept, within `CHAT_VISUAL_LIMITS` (3
+  charts and 3 tables; 50 labels a chart; 12 columns and 200 rows a table; what
+  is cut short is `truncated`). Protocol: `ds:chat-answer` may carry `charts`
+  and `tables`; still version 1. `/testing`: `answer({ charts, tables })`.
+
 ## 0.4.0
 
 ### Renamed

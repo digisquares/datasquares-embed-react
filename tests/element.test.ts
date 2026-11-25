@@ -226,6 +226,29 @@ describe('<datasquares-chat>', () => {
     expect(el.status).toBe('ready')
   })
 
+  it('0.5: standalone (attribute or property) asks for the analyst alone; ds-answer carries the charts and tables', () => {
+    const el = chat({ mode: 'inline' })
+    expect(el.standalone).toBe(false)
+    expect(new URL(frameOf(el)!.src).searchParams.has('standalone')).toBe(false)
+    el.setAttribute('standalone', '')
+    expect(el.standalone).toBe(true)
+    expect(new URL(frameOf(el)!.src).searchParams.get('standalone')).toBe('1')
+    el.standalone = false
+    expect(el.hasAttribute('standalone')).toBe(false)
+    expect(new URL(frameOf(el)!.src).searchParams.has('standalone')).toBe(false)
+
+    const sim = simulateChat(frameOf(el)!, { act: now })
+    const answers = events(el, 'ds-answer')
+    const table = { title: 'Top customers', columns: ['Customer', 'Orders'], rows: [['Acme', 12]], source: 'query' as const }
+    sim.answer({ question: 'Top customers?', answer: 'Acme.', tables: [table] })
+    sim.send({ type: 'ds:chat-answer', version: 1, conversationId: null, question: 'q', answer: 'a', blocked: false, charts: [{ title: 'Bad', kind: 'donut', labels: ['a'], series: [] }] })
+    expect(answers).toEqual([
+      { question: 'Top customers?', answer: 'Acme.', conversationId: null, blocked: false, followUps: [], answerIndex: null, tables: [table] },
+      { question: 'q', answer: 'a', conversationId: null, blocked: false, followUps: [], answerIndex: null },
+    ])
+    expect('charts' in (answers[1] as object)).toBe(false)
+  })
+
   it('ignores messages from another window or another origin', () => {
     const el = chat({ mode: 'inline' })
     const frame = frameOf(el)!
